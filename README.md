@@ -26,9 +26,13 @@ Phải chạy qua server (Vite/dev server hoặc `npm run preview`); mở thẳn
 | Chuột phải map | Dừng đường chạy hiện tại |
 | Cuộn chuột | Zoom 1x–4x |
 | G | Bật/tắt debug (ô bị chặn màu đỏ, ô người chơi đang đứng) |
-| Nút skin rắn/rồng | Mặc hoặc tháo skin tương ứng; có thể thêm cấu hình sheet trong `SPRITE_SKINS` |
+| Nút tiến hóa | Tiến lên bậc tiếp theo; thao tác không thể đổi ngược |
 
-Sprite sheet skin dùng ô 128×128, 8 hàng theo thứ tự W, WD, D, SD, S, SA, A, AW. `framesPerDirection` là số frame nằm ngang trên mỗi hàng. Ví dụ rồng có 10 frame/hướng cần ảnh 1280×1024 tại `public/assets/sprites/dragon_idle.png`; cập nhật config rồi đặt ảnh vào đúng đường dẫn.
+## Tài khoản và nhân vật (tạm thời)
+
+Chạy bằng `npm run dev`: đăng nhập chỉ với username, sau đó tạo hoặc chọn nhân vật để vào map. Mỗi username có tối đa 3 nhân vật; nhân vật có giới tính nam/nữ, loài gốc rắn và tiến hóa hiện tại được lưu trong `users.json`. Chuỗi tiến hóa hiện tại là Rắn → Rắn đỏ → Rồng; server chỉ cho tiến lên đúng bậc kế tiếp và không hỗ trợ đổi ngược. Dữ liệu được ghi qua middleware API của Vite dev server. Đây là lưu trữ tạm thời chỉ dùng khi chạy dev; `npm run preview`/static hosting chưa có API ghi file, và đăng nhập username không có xác thực mật khẩu.
+
+Sprite sheet tiến hóa dùng ô 128×128, 8 hàng theo thứ tự W, WD, D, SD, S, SA, A, AW và 8 frame mỗi hướng. Các ảnh `snake_idle.png`, `red_snake_idle.png` và `dragon_idle.png` lần lượt là Rắn, Rắn đỏ và Rồng; cấu hình nằm trong `SPRITE_EVOLUTIONS`.
 
 Nhân vật và quái trong bản mẫu phát sự kiện `target-selected` và `combat-command` trên event emitter của `GameScene`; lệnh chiến đấu có dạng `{ action: 'basic-attack' | 'skill-2', targetId }`. Đây là điểm nối cho hệ thống chiến đấu, chưa tự trừ máu hay thực hiện tỷ thí/theo sau.
 
@@ -36,7 +40,7 @@ Hiệu ứng click dùng `public/assets/sprites/click.png`, sprite sheet ngang 6
 
 Con trỏ web dùng `public/assets/images/cursor.png`; chỉnh `CURSOR.scale` trong `src/config.ts` để đổi kích thước hiển thị. Điểm hotspot trong ảnh cũng được thu nhỏ theo cùng tỉ lệ.
 
-Đặt `DEBUG=false` trong `.env` để ẩn/tắt debug trong game, chặn chuột phải và một số phím tắt DevTools/trang nguồn, đồng thời giữ con trỏ tùy chỉnh khi rê lên nút skin. Đây chỉ là hạn chế thao tác phổ biến phía trình duyệt, không thể bảo vệ mã hoặc ngăn hoàn toàn DevTools; muốn bật debug thì đặt `DEBUG=true` hoặc xóa biến này rồi khởi động/build lại.
+Đặt `DEBUG=false` trong `.env` để ẩn/tắt debug trong game, chặn chuột phải và một số phím tắt DevTools/trang nguồn, đồng thời giữ con trỏ tùy chỉnh khi rê lên các nút giao diện. Đây chỉ là hạn chế thao tác phổ biến phía trình duyệt, không thể bảo vệ mã hoặc ngăn hoàn toàn DevTools; muốn bật debug thì đặt `DEBUG=true` hoặc xóa biến này rồi khởi động/build lại.
 
 Game ghi `console.error` một lần nếu phát hiện chênh lệch kích thước cửa sổ thường gặp khi DevTools được dock. Đây chỉ là heuristic của trình duyệt: không phát hiện được mọi kiểu mở F12 (ví dụ DevTools tách cửa sổ) và có thể khác nhau theo browser.
 

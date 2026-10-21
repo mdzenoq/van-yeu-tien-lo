@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
-import { GAME, SPRITE_SKINS, type CharacterDef, type SpriteSkinId } from '../config';
+import { GAME, SPRITE_EVOLUTIONS, type CharacterDef } from '../config';
 import type { MapModel, Vec2 } from '../map/MapModel';
+import type { CharacterEvolution, PlayerCharacter } from '../types/accounts';
 
 const DIRECTION_SECTOR = Math.PI / 4;
 const DIRECTION_HYSTERESIS = Math.PI / 24;
@@ -13,7 +14,7 @@ export class Player {
   private path: Vec2[] = [];
   private facingLeft = false;
   private directionIndex = 4;
-  private activeSkinId: SpriteSkinId | null = null;
+  private activeEvolution: CharacterEvolution | null = null;
   // private walkTime = 0;
   /** Hệ số theo cỡ tile (tile 64px = 1) để sprite/tốc độ tự co giãn theo map. */
   private readonly unit: number;
@@ -23,7 +24,7 @@ export class Player {
     private readonly model: MapModel,
     tx: number,
     ty: number,
-    private readonly character: CharacterDef
+    character: CharacterDef
   ) {
     this.unit = model.tileWidth / 64;
     this.fx = tx + 0.5;
@@ -35,27 +36,29 @@ export class Player {
     this.syncSprite();
   }
 
-  get currentSkin(): SpriteSkinId | null {
-    return this.activeSkinId;
+  setEvolution(evolution: CharacterEvolution): void {
+    if (evolution === this.activeEvolution) return;
+    this.activeEvolution = evolution;
+    this.sprite.anims.stop();
+    const form = SPRITE_EVOLUTIONS[evolution];
+    this.sprite
+      .setTexture(form.key, this.directionIndex * form.framesPerDirection)
+      .setOrigin(0.5, 0.5)
+      .setScale(this.unit * 0.7)
+      .setFlipX(false);
+    this.playEvolutionAnimation();
   }
 
-  setSkin(skinId: SpriteSkinId | null): void {
-    if (skinId === this.activeSkinId) return;
-    this.activeSkinId = skinId;
+  setAppearance(character: CharacterDef, selectedCharacter: PlayerCharacter): void {
+    this.activeEvolution = null;
     this.sprite.anims.stop();
-    if (skinId) {
-      const skin = SPRITE_SKINS[skinId];
-      this.sprite
-        .setTexture(skin.key, this.directionIndex * skin.framesPerDirection)
-        .setOrigin(0.5, 0.5)
-        .setScale(this.unit * 0.7);
-    } else {
-      this.sprite
-        .setTexture(this.character.key)
-        .setOrigin(this.character.originX, this.character.originY)
-        .setScale(this.unit * this.character.scaleX, this.unit * this.character.scaleY)
-        .setFlipX(this.facingLeft);
-    }
+    this.sprite
+      .setTexture(character.key)
+      .setOrigin(character.originX, character.originY)
+      .setScale(this.unit * character.scaleX, this.unit * character.scaleY)
+      .setFlipX(this.facingLeft);
+    this.setEvolution(selectedCharacter.evolution);
+    this.syncSprite();
   }
 
   get tile(): Vec2 {
@@ -110,7 +113,7 @@ export class Player {
       moving = true;
     }
 
-    if (this.activeSkinId) this.playSkinAnimation();
+    if (this.activeEvolution) this.playEvolutionAnimation();
     this.syncSprite();
     return moving;
   }
@@ -128,11 +131,11 @@ export class Player {
     }
   }
 
-  private playSkinAnimation(): void {
-    const skinId = this.activeSkinId;
-    if (!skinId) return;
-    const skin = SPRITE_SKINS[skinId];
-    const key = `${skinId}-${skin.directions[this.directionIndex]}`;
+  private playEvolutionAnimation(): void {
+    const evolution = this.activeEvolution;
+    if (!evolution) return;
+    const form = SPRITE_EVOLUTIONS[evolution];
+    const key = `${evolution}-${form.directions[this.directionIndex]}`;
     if (this.sprite.anims.currentAnim?.key !== key || !this.sprite.anims.isPlaying) {
       this.sprite.play(key);
     }
@@ -162,7 +165,7 @@ export class Player {
   private syncSprite(): void {
     const p = this.model.tileToWorld(this.fx, this.fy);
     this.sprite.setPosition(p.x, p.y);
-    this.sprite.setFlipX(this.activeSkinId ? false : this.facingLeft);
+    this.sprite.setFlipX(this.activeEvolution ? false : this.facingLeft);
     // Cùng thang depth với tile "sorted": tx + ty + 1 là tâm tile.
     this.sprite.setDepth(this.fx + this.fy);
   }

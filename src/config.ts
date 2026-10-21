@@ -1,8 +1,10 @@
 // Đường dẫn tính từ thư mục public/ (Vite phục vụ ở gốc, base './' khi build).
+import type { CharacterEvolution } from './types/accounts';
+
 export const MAP_URL = 'assets/maps/tay-do.json';
 export const MAP_STREAM_ID = MAP_URL.split('/').pop()?.replace(/\.json$/i, '') ?? 'map';
 export const MAP_STREAM_BASE_URL = `assets/map-stream/${MAP_STREAM_ID}`;
-export const MAP_STREAM_RADIUS = 7;
+export const MAP_STREAM_RADIUS = 8; // bán kính ô tile (tính từ ô spawn) mà GameScene yêu cầu map stream tải về
 
 export const CLOUD_COVER = {
   key: 'cloud-cover',
@@ -49,9 +51,20 @@ export const CURSOR = {
   hotspotY: 3
 } as const;
 
-export const SPRITE_SKINS = {
-  snake: {
-    label: 'rắn',
+export const SPRITE_EVOLUTIONS: Record<
+  CharacterEvolution,
+  {
+    label: string;
+    key: string;
+    url: string;
+    frameWidth: number;
+    frameHeight: number;
+    framesPerDirection: number;
+    directions: typeof SKIN_DIRECTIONS;
+  }
+> = {
+  'snake': {
+    label: 'Rắn',
     key: 'snake-skin',
     url: 'assets/sprites/snake_idle.png',
     frameWidth: 128,
@@ -59,8 +72,17 @@ export const SPRITE_SKINS = {
     framesPerDirection: 8,
     directions: SKIN_DIRECTIONS
   },
-  dragon: {
-    label: 'rồng',
+  'red-snake': {
+    label: 'Rắn đỏ',
+    key: 'red-snake-skin',
+    url: 'assets/sprites/red_snake_idle.png',
+    frameWidth: 128,
+    frameHeight: 128,
+    framesPerDirection: 8,
+    directions: SKIN_DIRECTIONS
+  },
+  'dragon': {
+    label: 'Rồng',
     key: 'dragon-skin',
     url: 'assets/sprites/dragon_idle.png',
     frameWidth: 128,
@@ -69,8 +91,6 @@ export const SPRITE_SKINS = {
     directions: SKIN_DIRECTIONS
   }
 } as const;
-
-export type SpriteSkinId = keyof typeof SPRITE_SKINS;
 
 export const GAME = {
   // Giá trị zoom/tốc độ ứng với tile 64px; game tự nhân theo tileWidth/64 của map.

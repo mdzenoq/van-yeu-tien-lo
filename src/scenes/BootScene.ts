@@ -6,7 +6,7 @@ import {
   KEY,
   MAP_STREAM_BASE_URL,
   MAP_URL,
-  SPRITE_SKINS
+  SPRITE_EVOLUTIONS
 } from '../config';
 import { externalTilesetUrls, resolveTilesets, tsxCacheKey, type ResolvedTileset } from '../loaders/tilesets';
 import type { StreamedMapManifest } from '../map/StreamedMap';
@@ -29,7 +29,7 @@ export class BootScene extends Phaser.Scene {
     this.bar = this.add.graphics();
     this.load.on(Phaser.Loader.Events.PROGRESS, (value: number) => this.drawProgress(value));
     this.load.on(Phaser.Loader.Events.FILE_LOAD_ERROR, (file: Phaser.Loader.File) => {
-      if (file.key === SPRITE_SKINS.dragon.key || file.key === CLICK_EFFECT.key || file.key === CLOUD_COVER.key) {
+      if (file.key === CLICK_EFFECT.key || file.key === CLOUD_COVER.key) {
         console.warn(`[Boot] Bỏ qua asset tùy chọn không tải được: ${file.src}`);
         return;
       }
@@ -42,10 +42,10 @@ export class BootScene extends Phaser.Scene {
       frameWidth: CLICK_EFFECT.frameWidth,
       frameHeight: CLICK_EFFECT.frameHeight
     });
-    for (const skin of Object.values(SPRITE_SKINS)) {
-      this.load.spritesheet(skin.key, skin.url, {
-        frameWidth: skin.frameWidth,
-        frameHeight: skin.frameHeight
+    for (const evolution of Object.values(SPRITE_EVOLUTIONS)) {
+      this.load.spritesheet(evolution.key, evolution.url, {
+        frameWidth: evolution.frameWidth,
+        frameHeight: evolution.frameHeight
       });
     }
   }

@@ -1,9 +1,12 @@
 import Phaser from 'phaser';
-import { MAP_STREAM_RADIUS, SPRITE_SKINS, type SpriteSkinId } from '../config';
+import { MAP_STREAM_RADIUS, SPRITE_EVOLUTIONS } from '../config';
+import { AccountScreen } from '../ui/AccountScreen';
+import { NEXT_CHARACTER_EVOLUTION, type CharacterEvolution, type PlayerCharacter } from '../types/accounts';
 
 /** HUD chạy song song với GameScene, có camera riêng nên không bị ảnh hưởng bởi zoom. */
 export class UIScene extends Phaser.Scene {
   private contextMenuObjects: Phaser.GameObjects.GameObject[] = [];
+  private evolutionObjects: Phaser.GameObjects.GameObject[] = [];
 
   constructor() {
     super('UI');
@@ -11,6 +14,7 @@ export class UIScene extends Phaser.Scene {
 
   create(): void {
     this.contextMenuObjects = [];
+    this.evolutionObjects = [];
     const text = this.add
       .text(10, 10, '', {
         fontFamily: 'monospace',
@@ -22,39 +26,113 @@ export class UIScene extends Phaser.Scene {
       .setDepth(1);
 
     const game = this.scene.get('Game');
+    let activeUsername = '';
+    let activeCharacter: PlayerCharacter | undefined;
+    let evolving = false;
+    const evolutionLabel = (evolution: CharacterEvolution): string => {
+      return SPRITE_EVOLUTIONS[evolution].label;
+    };
+    const characterText = this.add
+      .text(10, 68, '', {
+        fontFamily: 'sans-serif',
+        fontSize: '15px',
+        color: '#ffffff',
+        backgroundColor: '#000000cc',
+        padding: { x: 10, y: 8 }
+      })
+      .setDepth(1)
+      .setVisible(false);
+    const evolveButton = this.add
+      .text(10, 108, '', {
+        fontFamily: 'sans-serif',
+        fontSize: '15px',
+        color: '#ffffff',
+        backgroundColor: '#397c63',
+        padding: { x: 10, y: 8 }
+      })
+      .setDepth(1)
+      .setInteractive()
+      .setVisible(false);
+    const evolutionMessage = this.add
+      .text(10, 150, '', {
+        fontFamily: 'sans-serif',
+        fontSize: '14px',
+        color: '#ff9b9b',
+        backgroundColor: '#000000cc',
+        padding: { x: 8, y: 6 }
+      })
+      .setDepth(1)
+      .setVisible(false);
+    this.evolutionObjects.push(characterText, evolveButton, evolutionMessage);
+    const refreshEvolutionUi = (): void => {
+      const character = activeCharacter;
+      if (!character) {
+        characterText.setVisible(false);
+        evolveButton.setVisible(false);
+        evolutionMessage.setVisible(false);
+        return;
+      }
+      characterText
+        .setText(`${character.name} · Gốc: ${evolutionLabel(character.baseSpecies)} · Hiện tại: ${evolutionLabel(character.evolution)}`)
+        .setVisible(true);
+      const next = NEXT_CHARACTER_EVOLUTION[character.evolution];
+      evolveButton
+        .setText(next ? `Tiến hóa thành ${evolutionLabel(next)} (không thể đổi)` : 'Đã đạt tiến hóa cao nhất')
+        .setStyle({ backgroundColor: next ? '#397c63' : '#596675' })
+        .setVisible(true)
+        .disableInteractive();
+      if (next && !evolving) evolveButton.setInteractive();
+      evolutionMessage.setVisible(!!evolutionMessage.text);
+    };
+    const accountScreen = new AccountScreen((character, username) => {
+      activeCharacter = character;
+      activeUsername = username;
+      evolutionMessage.setText('').setVisible(false);
+      refreshEvolutionUi();
+      game.events.emit('enter-game', character);
+    });
+    const evolveCharacter = async (): Promise<void> => {
+      const character = activeCharacter;
+      const next = character ? NEXT_CHARACTER_EVOLUTION[character.evolution] : undefined;
+      if (!character || !next || evolving) return;
+      if (!window.confirm(`Tiến hóa ${character.name} thành ${evolutionLabel(next)}? Không thể đổi hoặc quay lại.`)) {
+        return;
+      }
+      evolving = true;
+      evolutionMessage.setText('').setVisible(false);
+      refreshEvolutionUi();
+      try {
+        const response = await fetch('/api/characters/evolve', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            username: activeUsername,
+            characterId: character.id,
+            currentEvolution: character.evolution
+          })
+        });
+        const result = (await response.json()) as { character?: PlayerCharacter; error?: string };
+        if (!response.ok || !result.character) {
+          throw new Error(result.error || `Không thể tiến hóa (${response.status}).`);
+        }
+        activeCharacter = result.character;
+        game.events.emit('enter-game', result.character);
+      } catch (error) {
+        evolutionMessage
+          .setText(error instanceof Error ? error.message : String(error))
+          .setVisible(true);
+      } finally {
+        evolving = false;
+        refreshEvolutionUi();
+      }
+    };
+    evolveButton.on('pointerdown', () => void evolveCharacter());
     const onShowCharacterMenu = (position: { x: number; y: number }): void => {
       this.showCharacterMenu(position.x, position.y);
     };
     const onHideCharacterMenu = (): void => this.hideCharacterMenu();
     game.events.on('show-character-menu', onShowCharacterMenu);
     game.events.on('hide-character-menu', onHideCharacterMenu);
-    const availableSkins = (Object.keys(SPRITE_SKINS) as SpriteSkinId[]).filter((skinId) =>
-      this.textures.exists(SPRITE_SKINS[skinId].key)
-    );
-    const skinButtons = availableSkins.map((skinId, index) => {
-      const label = SPRITE_SKINS[skinId].label;
-      const button = this.add
-        .text(10, 68 + index * 44, `Mặc skin ${label}`, {
-          fontFamily: 'sans-serif',
-          fontSize: '16px',
-          color: '#ffffff',
-          backgroundColor: '#355b49',
-          padding: { x: 10, y: 8 }
-        })
-        .setDepth(1)
-        .setInteractive();
-      button.on('pointerdown', () => game.events.emit('equip-skin', skinId));
-      return { skinId, button };
-    });
-    const onSkinChanged = (activeSkin: SpriteSkinId | null): void => {
-      for (const { skinId, button } of skinButtons) {
-        const equipped = activeSkin === skinId;
-        button.setText(`${equipped ? 'Tháo' : 'Mặc'} skin ${SPRITE_SKINS[skinId].label}`);
-        button.setStyle({ backgroundColor: equipped ? '#67424a' : '#355b49' });
-      }
-    };
-    game.events.on('skin-changed', onSkinChanged);
-
     const onHud = (line: string): void => {
       const diameter = MAP_STREAM_RADIUS * 2 + 1;
       text.setText([
@@ -67,10 +145,12 @@ export class UIScene extends Phaser.Scene {
     game.events.on('hud', onHud);
     this.events.once('shutdown', () => {
       game.events.off('hud', onHud);
-      game.events.off('skin-changed', onSkinChanged);
       game.events.off('show-character-menu', onShowCharacterMenu);
       game.events.off('hide-character-menu', onHideCharacterMenu);
+      accountScreen.destroy();
       this.hideCharacterMenu();
+      this.evolutionObjects.forEach((object) => object.destroy());
+      this.evolutionObjects = [];
     });
   }
 

@@ -6,8 +6,7 @@ import {
   GAME,
   MAP_STREAM_BASE_URL,
   MAP_STREAM_RADIUS,
-  SPRITE_SKINS,
-  type SpriteSkinId
+  SPRITE_EVOLUTIONS
 } from '../config';
 import { Npc } from '../entities/Npc';
 import { Monster } from '../entities/Monster';
@@ -17,11 +16,13 @@ import { ChunkManager } from '../map/ChunkManager';
 import { GID_MASK, MapModel, type Vec2 } from '../map/MapModel';
 import type { StreamedCell, StreamedObject, StreamedMapManifest } from '../map/StreamedMap';
 import { getProp } from '../types/tiled';
+import type { PlayerCharacter } from '../types/accounts';
 
 export class GameScene extends Phaser.Scene {
   private model!: MapModel;
   private manifest!: StreamedMapManifest;
   private player?: Player;
+  private accountReady = false;
   private chunkManager!: ChunkManager;
   private cursors?: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd?: Record<'W' | 'A' | 'S' | 'D', Phaser.Input.Keyboard.Key>;
@@ -63,6 +64,7 @@ export class GameScene extends Phaser.Scene {
     this.tileObjectsByCell.clear();
     this.objectSprites.clear();
     this.player = undefined;
+    this.accountReady = false;
     this.npc = undefined;
     this.npcTile = undefined;
     this.monster = undefined;
@@ -100,13 +102,12 @@ export class GameScene extends Phaser.Scene {
     );
     this.events.once('shutdown', () => this.chunkManager.dispose());
 
-    const equipSkin = (skinId: SpriteSkinId): void => {
-      if (!this.player) return;
-      this.player.setSkin(this.player.currentSkin === skinId ? null : skinId);
-      this.events.emit('skin-changed', this.player.currentSkin);
+    const enterGame = (character: PlayerCharacter): void => {
+      this.player?.setAppearance(CHARACTERS[character.gender], character);
+      this.accountReady = true;
     };
-    this.events.on('equip-skin', equipSkin);
-    this.events.once('shutdown', () => this.events.off('equip-skin', equipSkin));
+    this.events.on('enter-game', enterGame);
+    this.events.once('shutdown', () => this.events.off('enter-game', enterGame));
 
     this.scene.launch('UI');
     this.events.once('shutdown', () => this.scene.stop('UI'));
@@ -116,11 +117,11 @@ export class GameScene extends Phaser.Scene {
   update(_time: number, delta: number): void {
     if (!this.player) return;
     const pointer = this.input.activePointer;
-    if (this.draggingMap && pointer.leftButtonDown()) {
+    if (this.accountReady && this.draggingMap && pointer.leftButtonDown()) {
       const worldPoint = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
       this.setMoveDestination(worldPoint.x, worldPoint.y, false);
     }
-    this.player.update(delta, this.readDirection());
+    if (this.accountReady) this.player.update(delta, this.readDirection());
 
     const tile = this.player.tile;
     this.chunkManager.updateCenter(tile.x, tile.y);
@@ -290,17 +291,16 @@ export class GameScene extends Phaser.Scene {
   }
 
   private createSkinAnimations(): void {
-    for (const [skinId, skin] of Object.entries(SPRITE_SKINS)) {
-      if (!this.textures.exists(skin.key)) continue;
-      skin.directions.forEach((direction, row) => {
-        const key = `${skinId}-${direction}`;
+    for (const [evolution, form] of Object.entries(SPRITE_EVOLUTIONS)) {
+      form.directions.forEach((direction, row) => {
+        const key = `${evolution}-${direction}`;
         if (this.anims.exists(key)) return;
-        const start = row * skin.framesPerDirection;
+        const start = row * form.framesPerDirection;
         this.anims.create({
           key,
-          frames: this.anims.generateFrameNumbers(skin.key, {
+          frames: this.anims.generateFrameNumbers(form.key, {
             start,
-            end: start + skin.framesPerDirection - 1
+            end: start + form.framesPerDirection - 1
           }),
           frameRate: 8,
           repeat: -1
