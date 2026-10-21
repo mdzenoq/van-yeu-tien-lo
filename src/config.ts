@@ -40,7 +40,7 @@ export const SPRITE_SKINS = {
     url: 'assets/sprites/dragon_idle.png',
     frameWidth: 128,
     frameHeight: 128,
-    framesPerDirection: 10,
+    framesPerDirection: 8,
     directions: SKIN_DIRECTIONS
   }
 } as const;
