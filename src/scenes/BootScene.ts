@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { CHARACTERS, KEY, MAP_URL } from '../config';
+import { CHARACTERS, KEY, MAP_URL, SPRITE_SKINS } from '../config';
 import { externalTilesetUrls, resolveTilesets, tsxCacheKey, type ResolvedTileset } from '../loaders/tilesets';
 import type { TiledMap } from '../types/tiled';
 
@@ -21,11 +21,21 @@ export class BootScene extends Phaser.Scene {
   preload(): void {
     this.bar = this.add.graphics();
     this.load.on(Phaser.Loader.Events.PROGRESS, (value: number) => this.drawProgress(value));
-    this.load.on(Phaser.Loader.Events.FILE_LOAD_ERROR, (file: Phaser.Loader.File) =>
-      this.fail(`Không tải được file: ${file.src}`)
-    );
+    this.load.on(Phaser.Loader.Events.FILE_LOAD_ERROR, (file: Phaser.Loader.File) => {
+      if (file.key === SPRITE_SKINS.dragon.key) {
+        console.warn(`[Boot] Bỏ qua skin rồng vì không tải được file: ${file.src}`);
+        return;
+      }
+      this.fail(`Không tải được file: ${file.src}`);
+    });
     this.load.json(KEY.MAP_RAW, MAP_URL);
     for (const c of Object.values(CHARACTERS)) this.load.image(c.key, c.url);
+    for (const skin of Object.values(SPRITE_SKINS)) {
+      this.load.spritesheet(skin.key, skin.url, {
+        frameWidth: skin.frameWidth,
+        frameHeight: skin.frameHeight
+      });
+    }
   }
 
   create(): void {

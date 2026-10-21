@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { CHARACTERS, GAME, KEY } from '../config';
+import { CHARACTERS, GAME, KEY, SPRITE_SKINS, type SpriteSkinId } from '../config';
 import { Npc } from '../entities/Npc';
 import { Player } from '../entities/Player';
 import type { ResolvedTileset } from '../loaders/tilesets';
@@ -41,6 +41,14 @@ export class GameScene extends Phaser.Scene {
 
     const spawn = this.model.spawn;
     this.player = new Player(this, this.model, spawn.x, spawn.y, CHARACTERS.female);
+    this.createSkinAnimations();
+
+    const equipSkin = (skinId: SpriteSkinId): void => {
+      this.player.setSkin(this.player.currentSkin === skinId ? null : skinId);
+      this.events.emit('skin-changed', this.player.currentSkin);
+    };
+    this.events.on('equip-skin', equipSkin);
+    this.events.once('shutdown', () => this.events.off('equip-skin', equipSkin));
 
     // Nhân vật nam đứng sẵn cách điểm spawn 2 ô, quay mặt về phía người chơi, và chặn đường.
     const npc = this.model.nearestFree(spawn.x + 2, spawn.y);
@@ -78,6 +86,26 @@ export class GameScene extends Phaser.Scene {
   }
 
   // ---------------------------------------------------------------- layers
+
+  private createSkinAnimations(): void {
+    for (const [skinId, skin] of Object.entries(SPRITE_SKINS)) {
+      if (!this.textures.exists(skin.key)) continue;
+      skin.directions.forEach((direction, row) => {
+        const key = `${skinId}-${direction}`;
+        if (this.anims.exists(key)) return;
+        const start = row * skin.framesPerDirection;
+        this.anims.create({
+          key,
+          frames: this.anims.generateFrameNumbers(skin.key, {
+            start,
+            end: start + skin.framesPerDirection - 1
+          }),
+          frameRate: 8,
+          repeat: -1
+        });
+      });
+    }
+  }
 
   private buildLayers(raw: TiledMap, tilesets: ResolvedTileset[]): void {
     const map = this.add.tilemap(KEY.MAP);

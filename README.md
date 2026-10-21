@@ -20,6 +20,9 @@ Phải chạy qua server (Vite/dev server hoặc `npm run preview`); mở thẳn
 | Click chuột trái | Tự tìm đường (BFS 8 hướng) tới ô được click |
 | Cuộn chuột | Zoom 1x–4x |
 | G | Bật/tắt debug (ô bị chặn màu đỏ, ô người chơi đang đứng) |
+| Nút skin rắn/rồng | Mặc hoặc tháo skin tương ứng; có thể thêm cấu hình sheet trong `SPRITE_SKINS` |
+
+Sprite sheet skin dùng ô 128×128, 8 hàng theo thứ tự W, WD, D, SD, S, SA, A, AW. `framesPerDirection` là số frame nằm ngang trên mỗi hàng. Ví dụ rồng có 10 frame/hướng cần ảnh 1280×1024 tại `public/assets/sprites/dragon_idle.png`; cập nhật config rồi đặt ảnh vào đúng đường dẫn.
 
 ## Cấu trúc
 

@@ -1,27 +1,58 @@
 import Phaser from 'phaser';
-import { GAME, type CharacterDef } from '../config';
+import { GAME, SPRITE_SKINS, type CharacterDef, type SpriteSkinId } from '../config';
 import type { MapModel, Vec2 } from '../map/MapModel';
 
 export class Player {
-  readonly sprite: Phaser.GameObjects.Image;
+  readonly sprite: Phaser.GameObjects.Sprite;
   fx: number;
   fy: number;
 
   private path: Vec2[] = [];
   private facingLeft = false;
+  private directionIndex = 4;
+  private activeSkinId: SpriteSkinId | null = null;
   // private walkTime = 0;
   /** Hệ số theo cỡ tile (tile 64px = 1) để sprite/tốc độ tự co giãn theo map. */
   private readonly unit: number;
 
-  constructor(scene: Phaser.Scene, private readonly model: MapModel, tx: number, ty: number, character: CharacterDef) {
+  constructor(
+    scene: Phaser.Scene,
+    private readonly model: MapModel,
+    tx: number,
+    ty: number,
+    private readonly character: CharacterDef
+  ) {
     this.unit = model.tileWidth / 64;
     this.fx = tx + 0.5;
     this.fy = ty + 0.5;
     this.sprite = scene.add
-      .image(0, 0, character.key)
+      .sprite(0, 0, character.key)
       .setOrigin(character.originX, character.originY)
       .setScale(this.unit * character.scaleX, this.unit * character.scaleY);
     this.syncSprite();
+  }
+
+  get currentSkin(): SpriteSkinId | null {
+    return this.activeSkinId;
+  }
+
+  setSkin(skinId: SpriteSkinId | null): void {
+    if (skinId === this.activeSkinId) return;
+    this.activeSkinId = skinId;
+    this.sprite.anims.stop();
+    if (skinId) {
+      const skin = SPRITE_SKINS[skinId];
+      this.sprite
+        .setTexture(skin.key, this.directionIndex * skin.framesPerDirection)
+        .setOrigin(0.5, 0.5)
+        .setScale(this.unit * 0.5);
+    } else {
+      this.sprite
+        .setTexture(this.character.key)
+        .setOrigin(this.character.originX, this.character.originY)
+        .setScale(this.unit * this.character.scaleX, this.unit * this.character.scaleY)
+        .setFlipX(this.facingLeft);
+    }
   }
 
   get tile(): Vec2 {
@@ -43,6 +74,7 @@ export class Player {
       const len = Math.hypot(dir.x, dir.y * 0.5);
       const wx = (dir.x / len) * step;
       const wy = ((dir.y * 0.5) / len) * step;
+      this.updateDirection(wx, wy);
       this.moveWorld(wx, wy);
       if (wx !== 0) this.facingLeft = wx < 0;
       moving = true;
@@ -57,6 +89,7 @@ export class Player {
       const wx = (dfx - dfy) * hw;
       const wy = (dfx + dfy) * hh;
       const dist = Math.hypot(wx, wy);
+      this.updateDirection(wx, wy);
       if (dist <= step) {
         this.fx = cx;
         this.fy = cy;
@@ -70,9 +103,26 @@ export class Player {
       moving = true;
     }
 
-    // this.walkTime = moving ? this.walkTime + deltaMs : 0;
+    if (this.activeSkinId) this.playSkinAnimation();
     this.syncSprite();
     return moving;
+  }
+
+  private updateDirection(x: number, y: number): void {
+    if (x === 0 && y === 0) return;
+    const horizontal = Math.sign(x);
+    const vertical = Math.sign(y);
+    if (vertical < 0) this.directionIndex = horizontal > 0 ? 1 : horizontal < 0 ? 7 : 0;
+    else if (vertical > 0) this.directionIndex = horizontal > 0 ? 3 : horizontal < 0 ? 5 : 4;
+    else this.directionIndex = horizontal > 0 ? 2 : 6;
+  }
+
+  private playSkinAnimation(): void {
+    const skinId = this.activeSkinId;
+    if (!skinId) return;
+    const skin = SPRITE_SKINS[skinId];
+    const key = `${skinId}-${skin.directions[this.directionIndex]}`;
+    if (this.sprite.anims.currentAnim?.key !== key) this.sprite.play(key);
   }
 
   /** Dịch chuyển theo vector world (pixel) -> đổi sang delta tile, tách trục để trượt dọc tường. */
@@ -99,7 +149,7 @@ export class Player {
   private syncSprite(): void {
     const p = this.model.tileToWorld(this.fx, this.fy);
     this.sprite.setPosition(p.x, p.y);
-    this.sprite.setFlipX(this.facingLeft);
+    this.sprite.setFlipX(this.activeSkinId ? false : this.facingLeft);
     // Cùng thang depth với tile "sorted": tx + ty + 1 là tâm tile.
     this.sprite.setDepth(this.fx + this.fy);
   }

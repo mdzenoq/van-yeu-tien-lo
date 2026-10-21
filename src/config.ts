@@ -22,6 +22,31 @@ export const CHARACTERS: Record<'male' | 'female', CharacterDef> = {
   female: { key: 'char-female', url: 'assets/sprites/player_female.png', originX: 0.5, originY: 56 / 64, scaleX: 0.92, scaleY: 0.96 }
 };
 
+export const SKIN_DIRECTIONS = ['W', 'WD', 'D', 'SD', 'S', 'SA', 'A', 'AW'] as const;
+
+export const SPRITE_SKINS = {
+  snake: {
+    label: 'rắn',
+    key: 'snake-skin',
+    url: 'assets/sprites/snake_idle.png',
+    frameWidth: 128,
+    frameHeight: 128,
+    framesPerDirection: 8,
+    directions: SKIN_DIRECTIONS
+  },
+  dragon: {
+    label: 'rồng',
+    key: 'dragon-skin',
+    url: 'assets/sprites/dragon_idle.png',
+    frameWidth: 128,
+    frameHeight: 128,
+    framesPerDirection: 10,
+    directions: SKIN_DIRECTIONS
+  }
+} as const;
+
+export type SpriteSkinId = keyof typeof SPRITE_SKINS;
+
 export const GAME = {
   // Giá trị zoom/tốc độ ứng với tile 64px; game tự nhân theo tileWidth/64 của map.
   ZOOM: 2,
