@@ -33,7 +33,7 @@ export class UIScene extends Phaser.Scene {
           padding: { x: 10, y: 8 }
         })
         .setDepth(1)
-        .setInteractive({ useHandCursor: true });
+        .setInteractive();
       button.on('pointerdown', () => game.events.emit('equip-skin', skinId));
       return { skinId, button };
     });

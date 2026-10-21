@@ -45,7 +45,7 @@ export class Player {
       this.sprite
         .setTexture(skin.key, this.directionIndex * skin.framesPerDirection)
         .setOrigin(0.5, 0.5)
-        .setScale(this.unit * 0.5);
+        .setScale(this.unit * 0.7);
     } else {
       this.sprite
         .setTexture(this.character.key)

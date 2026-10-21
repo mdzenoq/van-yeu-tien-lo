@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { CHARACTERS, GAME, KEY, SPRITE_SKINS, type SpriteSkinId } from '../config';
+import { CHARACTERS, CLICK_EFFECT, GAME, KEY, SPRITE_SKINS, type SpriteSkinId } from '../config';
 import { Npc } from '../entities/Npc';
 import { Player } from '../entities/Player';
 import type { ResolvedTileset } from '../loaders/tilesets';
@@ -20,7 +20,7 @@ export class GameScene extends Phaser.Scene {
   private player!: Player;
   private cursors?: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd?: Record<'W' | 'A' | 'S' | 'D', Phaser.Input.Keyboard.Key>;
-  private marker!: Phaser.GameObjects.Graphics;
+  private clickEffect?: Phaser.GameObjects.Sprite;
   private debugBlocked!: Phaser.GameObjects.Graphics;
   private debugCursor!: Phaser.GameObjects.Graphics;
   private debugOn = false;
@@ -57,7 +57,7 @@ export class GameScene extends Phaser.Scene {
       this.model.block(npc.x, npc.y);
     }
 
-    this.marker = this.add.graphics().setDepth(50000);
+    this.createClickEffect();
     this.debugBlocked = this.add.graphics().setDepth(50001).setVisible(false);
     this.debugCursor = this.add.graphics().setDepth(50002).setVisible(false);
     this.drawBlockedOverlay();
@@ -73,9 +73,10 @@ export class GameScene extends Phaser.Scene {
     this.player.update(delta, this.readDirection());
 
     const t = this.player.tile;
+    const debugHint = __DEBUG__ ? '  |  G: debug' : '';
     this.events.emit(
       'hud',
-      `Tile: (${t.x}, ${t.y})  |  Zoom: ${(this.cameras.main.zoom * this.unit).toFixed(2)}  |  Debug: ${this.debugOn ? 'ON' : 'OFF'}`
+      `Tile: (${t.x}, ${t.y})  |  Zoom: ${(this.cameras.main.zoom * this.unit).toFixed(2)}${debugHint}`
     );
 
     if (this.debugOn) {
@@ -86,6 +87,28 @@ export class GameScene extends Phaser.Scene {
   }
 
   // ---------------------------------------------------------------- layers
+
+  private createClickEffect(): void {
+    if (!this.textures.exists(CLICK_EFFECT.key)) return;
+    if (!this.anims.exists(CLICK_EFFECT.key)) {
+      this.anims.create({
+        key: CLICK_EFFECT.key,
+        frames: this.anims.generateFrameNumbers(CLICK_EFFECT.key, {
+          start: 0,
+          end: CLICK_EFFECT.frameCount - 1
+        }),
+        frameRate: 12,
+        repeat: 0
+      });
+    }
+    this.clickEffect = this.add
+      .sprite(0, 0, CLICK_EFFECT.key)
+      .setOrigin(0.5)
+      .setScale(this.unit)
+      .setDepth(200000)
+      .setVisible(false);
+    this.clickEffect.on(Phaser.Animations.Events.ANIMATION_COMPLETE, () => this.clickEffect?.setVisible(false));
+  }
 
   private createSkinAnimations(): void {
     for (const [skinId, skin] of Object.entries(SPRITE_SKINS)) {
@@ -218,7 +241,9 @@ export class GameScene extends Phaser.Scene {
     if (kb) {
       this.cursors = kb.createCursorKeys();
       this.wasd = kb.addKeys('W,A,S,D') as Record<'W' | 'A' | 'S' | 'D', Phaser.Input.Keyboard.Key>;
-      kb.addKey(Phaser.Input.Keyboard.KeyCodes.G).on('down', () => this.toggleDebug());
+      if (__DEBUG__) {
+        kb.addKey(Phaser.Input.Keyboard.KeyCodes.G).on('down', () => this.toggleDebug());
+      }
     }
 
     this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
@@ -228,7 +253,7 @@ export class GameScene extends Phaser.Scene {
       const gy = Math.floor(t.y);
       const from = this.player.tile;
       const path = this.model.findPath(from.x, from.y, gx, gy);
-      this.showMarker(gx, gy, path !== null);
+      this.playClickEffect(p.worldX, p.worldY);
       if (path) this.player.setPath(path);
     });
 
@@ -269,15 +294,9 @@ export class GameScene extends Phaser.Scene {
     g.closePath();
   }
 
-  private showMarker(tx: number, ty: number, ok: boolean): void {
-    const color = ok ? 0x6fd08c : 0xff6b6b;
-    this.tweens.killTweensOf(this.marker);
-    this.marker.clear().setAlpha(1);
-    this.diamond(this.marker, tx, ty);
-    this.marker.fillStyle(color, 0.35).fillPath();
-    this.diamond(this.marker, tx, ty);
-    this.marker.lineStyle(2, color, 1).strokePath();
-    this.tweens.add({ targets: this.marker, alpha: 0, duration: 700, ease: 'Quad.easeIn' });
+  private playClickEffect(x: number, y: number): void {
+    if (!this.clickEffect) return;
+    this.clickEffect.setPosition(x, y).setVisible(true).play(CLICK_EFFECT.key, true);
   }
 
   private drawBlockedOverlay(): void {
@@ -302,6 +321,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private toggleDebug(): void {
+    if (!__DEBUG__) return;
     this.debugOn = !this.debugOn;
     this.debugBlocked.setVisible(this.debugOn);
     this.debugCursor.setVisible(this.debugOn);

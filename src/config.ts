@@ -24,6 +24,21 @@ export const CHARACTERS: Record<'male' | 'female', CharacterDef> = {
 
 export const SKIN_DIRECTIONS = ['W', 'WD', 'D', 'SD', 'S', 'SA', 'A', 'AW'] as const;
 
+export const CLICK_EFFECT = {
+  key: 'click-effect',
+  url: 'assets/sprites/click.png',
+  frameWidth: 32,
+  frameHeight: 32,
+  frameCount: 6
+} as const;
+
+export const CURSOR = {
+  url: 'assets/images/cursor.png',
+  scale: 0.4,
+  hotspotX: 5,
+  hotspotY: 3
+} as const;
+
 export const SPRITE_SKINS = {
   snake: {
     label: 'rắn',

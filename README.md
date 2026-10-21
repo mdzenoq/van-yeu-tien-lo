@@ -17,12 +17,18 @@ Phải chạy qua server (Vite/dev server hoặc `npm run preview`); mở thẳn
 | Phím / chuột | Tác dụng |
 |---|---|
 | WASD / mũi tên | Đi theo hướng màn hình (lên/xuống/trái/phải) |
-| Click chuột trái | Tự tìm đường (BFS 8 hướng) tới ô được click |
+| Click chuột trái | Hiện hiệu ứng click tại con trỏ và tự tìm đường (BFS 8 hướng) tới ô được click |
 | Cuộn chuột | Zoom 1x–4x |
 | G | Bật/tắt debug (ô bị chặn màu đỏ, ô người chơi đang đứng) |
 | Nút skin rắn/rồng | Mặc hoặc tháo skin tương ứng; có thể thêm cấu hình sheet trong `SPRITE_SKINS` |
 
 Sprite sheet skin dùng ô 128×128, 8 hàng theo thứ tự W, WD, D, SD, S, SA, A, AW. `framesPerDirection` là số frame nằm ngang trên mỗi hàng. Ví dụ rồng có 10 frame/hướng cần ảnh 1280×1024 tại `public/assets/sprites/dragon_idle.png`; cập nhật config rồi đặt ảnh vào đúng đường dẫn.
+
+Hiệu ứng click dùng `public/assets/sprites/click.png`, sprite sheet ngang 6 frame, mỗi frame 32×32px.
+
+Con trỏ web dùng `public/assets/images/cursor.png`; chỉnh `CURSOR.scale` trong `src/config.ts` để đổi kích thước hiển thị. Điểm hotspot trong ảnh cũng được thu nhỏ theo cùng tỉ lệ.
+
+Đặt `DEBUG=false` trong `.env` để ẩn/tắt debug trong game, chặn chuột phải và một số phím tắt DevTools/trang nguồn, đồng thời giữ con trỏ tùy chỉnh khi rê lên nút skin. Đây chỉ là hạn chế thao tác phổ biến phía trình duyệt, không thể bảo vệ mã hoặc ngăn hoàn toàn DevTools; muốn bật debug thì đặt `DEBUG=true` hoặc xóa biến này rồi khởi động/build lại.
 
 ## Cấu trúc
 
