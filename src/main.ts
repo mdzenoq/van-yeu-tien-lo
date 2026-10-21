@@ -1,8 +1,8 @@
 import Phaser from 'phaser';
+import { CURSOR } from './config';
 import { BootScene } from './scenes/BootScene';
 import { GameScene } from './scenes/GameScene';
 import { UIScene } from './scenes/UIScene';
-import { CURSOR } from './config';
 
 let devToolsWarningLogged = false;
 const reportDockedDevTools = (): void => {
@@ -48,7 +48,8 @@ const game = new Phaser.Game({
   type: Phaser.AUTO,
   parent: 'app',
   backgroundColor: '#1b2430',
-  pixelArt: true,
+  antialias: true,
+  antialiasGL: true,
   scale: {
     mode: Phaser.Scale.RESIZE,
     autoCenter: Phaser.Scale.CENTER_BOTH

@@ -5,6 +5,11 @@ interface CachedCell {
   lastUsed: number;
 }
 
+interface CellCenter {
+  x: number;
+  y: number;
+}
+
 const MAX_CACHED_CELLS = 64;
 const MAX_FETCH_ATTEMPTS = 3;
 const MAX_CONCURRENT_CELL_REQUESTS = 12;
@@ -16,6 +21,7 @@ export class ChunkManager {
   private activeCells: StreamedCell[] = [];
   private requestedCenter = '';
   private appliedCenter = '';
+  private appliedPrimaryCenter = '';
   private failedCenter = '';
   private targetCenter = '';
   private requestId = 0;
@@ -33,8 +39,20 @@ export class ChunkManager {
   ) {}
 
   updateCenter(centerX: number, centerY: number): void {
+    this.updateCenters([{ x: centerX, y: centerY }]);
+  }
+
+  updateCenters(centers: readonly CellCenter[]): void {
     if (this.disposed) return;
-    const center = `${centerX},${centerY}`;
+    if (centers.length === 0) return;
+    const [primary, ...others] = centers;
+    const uniqueCenters = [
+      primary,
+      ...[...new Map(others.map((center) => [`${center.x},${center.y}`, center])).values()].sort(
+        (a, b) => a.x - b.x || a.y - b.y
+      )
+    ];
+    const center = uniqueCenters.map(({ x, y }) => `${x},${y}`).join('|');
     this.targetCenter = center;
     if (center === this.appliedCenter) {
       if (this.requestedCenter && this.requestedCenter !== center) {
@@ -52,11 +70,12 @@ export class ChunkManager {
 
     this.requestedCenter = center;
     const requestId = ++this.requestId;
-    void this.loadRegion(centerX, centerY, requestId, center)
+    void this.loadRegion(uniqueCenters, requestId, center)
       .then((cells) => {
         if (this.disposed || requestId !== this.requestId || this.targetCenter !== center) return;
         this.activeCells = cells;
         this.appliedCenter = center;
+        this.appliedPrimaryCenter = `${primary.x},${primary.y}`;
         this.failedCenter = '';
         this.nextRetryAt = 0;
         this.regionRetryCount = 0;
@@ -73,7 +92,7 @@ export class ChunkManager {
           this.regionRetryCount++;
           window.setTimeout(() => {
             if (!this.disposed && this.targetCenter === center && this.appliedCenter !== center) {
-              this.updateCenter(centerX, centerY);
+              this.updateCenters(uniqueCenters);
             }
           }, 2000);
         }
@@ -85,8 +104,8 @@ export class ChunkManager {
   }
 
   get currentCenter(): { x: number; y: number } | null {
-    if (!this.appliedCenter) return null;
-    const [x, y] = this.appliedCenter.split(',').map(Number);
+    if (!this.appliedPrimaryCenter) return null;
+    const [x, y] = this.appliedPrimaryCenter.split(',').map(Number);
     return { x, y };
   }
 
@@ -98,14 +117,17 @@ export class ChunkManager {
     this.inFlight.clear();
   }
 
-  private async loadRegion(centerX: number, centerY: number, requestId: number, center: string): Promise<StreamedCell[]> {
-    const coordinates: Array<{ x: number; y: number }> = [];
-    for (let y = centerY - this.radius; y <= centerY + this.radius; y++) {
-      for (let x = centerX - this.radius; x <= centerX + this.radius; x++) {
-        if (x < 0 || y < 0 || x >= this.width || y >= this.height) continue;
-        coordinates.push({ x, y });
+  private async loadRegion(centers: readonly CellCenter[], requestId: number, center: string): Promise<StreamedCell[]> {
+    const coordinateMap = new Map<string, CellCenter>();
+    for (const regionCenter of centers) {
+      for (let y = regionCenter.y - this.radius; y <= regionCenter.y + this.radius; y++) {
+        for (let x = regionCenter.x - this.radius; x <= regionCenter.x + this.radius; x++) {
+          if (x < 0 || y < 0 || x >= this.width || y >= this.height) continue;
+          coordinateMap.set(`${x}_${y}`, { x, y });
+        }
       }
     }
+    const coordinates = [...coordinateMap.values()];
     const cells: StreamedCell[] = [];
     for (let start = 0; start < coordinates.length; start += MAX_CONCURRENT_CELL_REQUESTS) {
       if (this.disposed || requestId !== this.requestId || this.targetCenter !== center) return [];

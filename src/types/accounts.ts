@@ -1,3 +1,5 @@
+import type { CharacterStats } from './pvp';
+
 export type CharacterGender = 'male' | 'female';
 export type CharacterSpecies = 'snake';
 export type CharacterEvolution = 'snake' | 'red-snake' | 'dragon';
@@ -13,6 +15,7 @@ export interface PlayerCharacter {
   gender: CharacterGender;
   baseSpecies: CharacterSpecies;
   evolution: CharacterEvolution;
+  stats: CharacterStats;
 }
 
 export interface UserAccount {

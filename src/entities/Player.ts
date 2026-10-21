@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { GAME, SPRITE_EVOLUTIONS, type CharacterDef } from '../config';
+import { Nameplate } from './Nameplate';
 import type { MapModel, Vec2 } from '../map/MapModel';
 import type { CharacterEvolution, PlayerCharacter } from '../types/accounts';
 
@@ -15,6 +16,11 @@ export class Player {
   private facingLeft = false;
   private directionIndex = 4;
   private activeEvolution: CharacterEvolution | null = null;
+  private readonly nameplate: Nameplate;
+  private name = '';
+  private nameplateHp = 1;
+  private nameplateMaxHp = 1;
+  private nameplateColor = '#63c5ff';
   // private walkTime = 0;
   /** Hệ số theo cỡ tile (tile 64px = 1) để sprite/tốc độ tự co giãn theo map. */
   private readonly unit: number;
@@ -33,7 +39,16 @@ export class Player {
       .sprite(0, 0, character.key)
       .setOrigin(character.originX, character.originY)
       .setScale(this.unit * character.scaleX, this.unit * character.scaleY);
+    this.nameplate = new Nameplate(scene);
     this.syncSprite();
+  }
+
+  setNameplate(name: string, hp: number, maxHp: number, color = '#63c5ff'): void {
+    this.name = name;
+    this.nameplateHp = hp;
+    this.nameplateMaxHp = maxHp;
+    this.nameplateColor = color;
+    this.syncNameplate();
   }
 
   setEvolution(evolution: CharacterEvolution): void {
@@ -63,6 +78,16 @@ export class Player {
 
   get tile(): Vec2 {
     return { x: Math.floor(this.fx), y: Math.floor(this.fy) };
+  }
+
+  get direction(): number {
+    return this.directionIndex;
+  }
+
+  setWorldTilePosition(x: number, y: number): void {
+    this.fx = x;
+    this.fy = y;
+    this.syncSprite();
   }
 
   setPath(path: Vec2[]): void {
@@ -168,5 +193,20 @@ export class Player {
     this.sprite.setFlipX(this.activeEvolution ? false : this.facingLeft);
     // Cùng thang depth với tile "sorted": tx + ty + 1 là tâm tile.
     this.sprite.setDepth(this.fx + this.fy);
+    this.syncNameplate();
+  }
+
+  private syncNameplate(): void {
+    if (!this.name) return;
+    this.nameplate.sync(
+      this.model,
+      this.fx,
+      this.fy,
+      this.name,
+      this.nameplateColor,
+      this.nameplateHp,
+      this.nameplateMaxHp,
+      this.fx + this.fy
+    );
   }
 }

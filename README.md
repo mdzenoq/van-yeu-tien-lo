@@ -30,9 +30,23 @@ Phải chạy qua server (Vite/dev server hoặc `npm run preview`); mở thẳn
 
 ## Tài khoản và nhân vật (tạm thời)
 
-Chạy bằng `npm run dev`: đăng nhập chỉ với username, sau đó tạo hoặc chọn nhân vật để vào map. Mỗi username có tối đa 3 nhân vật; nhân vật có giới tính nam/nữ, loài gốc rắn và tiến hóa hiện tại được lưu trong `users.json`. Chuỗi tiến hóa hiện tại là Rắn → Rắn đỏ → Rồng; server chỉ cho tiến lên đúng bậc kế tiếp và không hỗ trợ đổi ngược. Dữ liệu được ghi qua middleware API của Vite dev server. Đây là lưu trữ tạm thời chỉ dùng khi chạy dev; `npm run preview`/static hosting chưa có API ghi file, và đăng nhập username không có xác thực mật khẩu.
+Chạy bằng `npm run dev`: đăng nhập chỉ với username, sau đó tạo hoặc chọn nhân vật để vào map. Mỗi username có tối đa 3 nhân vật; nhân vật có giới tính nam/nữ, loài gốc rắn và tiến hóa hiện tại được lưu trong `users.json`. Chuỗi tiến hóa hiện tại là Rắn → Rắn đỏ → Rồng; server chỉ cho tiến lên đúng bậc kế tiếp và không hỗ trợ đổi ngược. Dữ liệu được ghi qua middleware API của Vite dev server. Khi đọc dữ liệu lưu cũ, API chuyển trường chỉ số `armorPenetration` sang `armorPen` và giữ nguyên các chỉ số hiện có. Đây là lưu trữ tạm thời chỉ dùng khi chạy dev; `npm run preview`/static hosting chưa có API ghi file, và đăng nhập username không có xác thực mật khẩu.
 
-Sprite sheet tiến hóa dùng ô 128×128, 8 hàng theo thứ tự W, WD, D, SD, S, SA, A, AW và 8 frame mỗi hướng. Các ảnh `snake_idle.png`, `red_snake_idle.png` và `dragon_idle.png` lần lượt là Rắn, Rắn đỏ và Rồng; cấu hình nằm trong `SPRITE_EVOLUTIONS`.
+## PvP local
+
+PvP hiện chạy qua WebSocket của cùng Vite dev server và dùng chung một map trong tiến trình server. Mở `npm run dev` một lần rồi đăng nhập bằng hai username khác nhau trên hai trình duyệt/cửa sổ. Mỗi client tải vùng map quanh mình và các người chơi online để giữ terrain/collision đồng bộ khi họ đi xa nhau. Tên nhân vật tự hiển thị phía trên thanh máu; tên thường màu xanh lam, đối thủ PK màu đỏ, với viền tối nhẹ để tăng độ tương phản. Trên máy khác trong cùng mạng LAN, chạy server với `npm run dev -- --host 0.0.0.0` và mở địa chỉ LAN của máy host; mạng/firewall phải cho phép cổng Vite. Một nhân vật chỉ có thể online ở một trình duyệt cùng lúc.
+
+Chuột phải lên nhân vật online → **Tỷ thí** để gửi lời mời; người nhận chọn **Xác nhận** hoặc **Hủy**. Lời mời hết hạn sau 60 giây. Khi xác nhận, chỉ hai đối thủ thấy dấu PK; người chơi thứ ba vẫn thấy nhân vật như thường. Trong tỷ thí, click trái đối thủ đánh thường và chuột phải dùng skill 2. Đòn thường hồi chiêu 1 giây, skill 2 hồi chiêu 8 giây. Server tính sát thương theo `max(1, floor(attack × hệ số − max(0, defense − armorPen)))`, hệ số lần lượt là 1 và 1.5. Người hết HP trước thua; hai đòn kết liễu gần như đồng thời được xử hòa; hết 5 phút mà chưa ai hết HP thì hòa. Ngắt kết nối trong tỷ thí được tính là thua.
+
+| Tiến hóa | HP tối đa | Tấn công | Phòng thủ | Xuyên giáp |
+|---|---:|---:|---:|---:|
+| Rắn | 1000 | 100 | 20 | 0 |
+| Rắn đỏ | 1400 | 135 | 35 | 10 |
+| Rồng | 1800 | 180 | 55 | 20 |
+
+Các chỉ số và combat state được quản lý phía server dev; HP trong tỷ thí bắt đầu đầy mỗi trận. Đây là prototype local, chưa có mật khẩu/xác thực tài khoản hoặc bảo vệ cho triển khai Internet.
+
+Sprite sheet tiến hóa dùng ô 128×128, 8 hàng theo thứ tự W, WD, D, SD, S, SA, A, AW và 8 frame mỗi hướng. Các ảnh `snake_idle.png`, `red_snake_idle.png` và `dragon_idle.png` lần lượt là Rắn, Rắn đỏ và Rồng; cấu hình nằm trong `SPRITE_EVOLUTIONS`. Bộ lọc nội suy của Phaser được bật để làm mịn ảnh PNG khi co giãn.
 
 Nhân vật và quái trong bản mẫu phát sự kiện `target-selected` và `combat-command` trên event emitter của `GameScene`; lệnh chiến đấu có dạng `{ action: 'basic-attack' | 'skill-2', targetId }`. Đây là điểm nối cho hệ thống chiến đấu, chưa tự trừ máu hay thực hiện tỷ thí/theo sau.
 

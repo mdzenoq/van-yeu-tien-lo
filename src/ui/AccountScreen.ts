@@ -123,12 +123,24 @@ export class AccountScreen {
     const form = document.createElement('form');
     form.style.display = 'grid';
     form.style.gap = '14px';
+    const nameLabel = document.createElement('label');
+    nameLabel.textContent = 'Tên nhân vật';
+    nameLabel.style.color = '#c4cfdb';
+    const name = document.createElement('input');
+    name.type = 'text';
+    name.name = 'characterName';
+    name.placeholder = 'Nhập tên nhân vật';
+    name.maxLength = 20;
+    name.required = true;
+    this.styleInput(name);
+    nameLabel.append(name);
     const gender = this.selectField('Giới tính', [
       ['female', 'Nữ'],
       ['male', 'Nam']
     ]);
     const submit = this.button('Tạo và vào game', true, 'submit');
     form.append(
+      nameLabel,
       gender.label,
       gender.select,
       this.paragraph('Loài gốc: Rắn. Tiến hóa sẽ được chọn sau và không thể đổi ngược.'),
@@ -141,6 +153,7 @@ export class AccountScreen {
       try {
         const result = await this.request<{ user: UserAccount }>('/api/characters', {
           username: user.username,
+          name: name.value.trim(),
           gender: gender.select.value
         });
         this.user = result.user;

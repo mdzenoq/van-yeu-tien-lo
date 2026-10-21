@@ -11,18 +11,34 @@ import {
 import { Npc } from '../entities/Npc';
 import { Monster } from '../entities/Monster';
 import { Player } from '../entities/Player';
+import { RemotePlayer } from '../entities/RemotePlayer';
 import type { ResolvedTileset } from '../loaders/tilesets';
 import { ChunkManager } from '../map/ChunkManager';
 import { GID_MASK, MapModel, type Vec2 } from '../map/MapModel';
 import type { StreamedCell, StreamedObject, StreamedMapManifest } from '../map/StreamedMap';
 import { getProp } from '../types/tiled';
 import type { PlayerCharacter } from '../types/accounts';
+import type {
+  ClientPvPMessage,
+  CharacterStats,
+  DuelView,
+  NetworkPlayer,
+  ServerPvPMessage
+} from '../types/pvp';
 
 export class GameScene extends Phaser.Scene {
   private model!: MapModel;
   private manifest!: StreamedMapManifest;
   private player?: Player;
   private accountReady = false;
+  private selectedCharacter?: PlayerCharacter;
+  private activeUsername = '';
+  private networkSocket?: WebSocket;
+  private positionSync?: Phaser.Time.TimerEvent;
+  private activeDuel?: DuelView;
+  private playerStats?: CharacterStats;
+  private readonly networkPlayers = new Map<string, NetworkPlayer>();
+  private readonly remoteSprites = new Map<string, RemotePlayer>();
   private chunkManager!: ChunkManager;
   private cursors?: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd?: Record<'W' | 'A' | 'S' | 'D', Phaser.Input.Keyboard.Key>;
@@ -65,6 +81,14 @@ export class GameScene extends Phaser.Scene {
     this.objectSprites.clear();
     this.player = undefined;
     this.accountReady = false;
+    this.selectedCharacter = undefined;
+    this.activeUsername = '';
+    this.networkSocket = undefined;
+    this.positionSync = undefined;
+    this.activeDuel = undefined;
+    this.playerStats = undefined;
+    this.networkPlayers.clear();
+    this.remoteSprites.clear();
     this.npc = undefined;
     this.npcTile = undefined;
     this.monster = undefined;
@@ -102,16 +126,256 @@ export class GameScene extends Phaser.Scene {
     );
     this.events.once('shutdown', () => this.chunkManager.dispose());
 
-    const enterGame = (character: PlayerCharacter): void => {
-      this.player?.setAppearance(CHARACTERS[character.gender], character);
-      this.accountReady = true;
+    const enterGame = (selection: { character: PlayerCharacter; username: string }): void => {
+      this.selectedCharacter = selection.character;
+      this.activeUsername = selection.username;
+      this.player?.setAppearance(CHARACTERS[selection.character.gender], selection.character);
+      this.playerStats = selection.character.stats;
+      this.syncLocalNameplate();
+      if (this.networkSocket?.readyState === WebSocket.OPEN) {
+        this.sendNetwork({ type: 'character-update', evolution: selection.character.evolution });
+      } else {
+        this.connectMultiplayer();
+      }
     };
     this.events.on('enter-game', enterGame);
     this.events.once('shutdown', () => this.events.off('enter-game', enterGame));
+    const onRequestDuel = (targetId: string): void => this.sendNetwork({ type: 'challenge', targetId });
+    const onRespondDuel = (response: { challengeId: string; accept: boolean }): void =>
+      this.sendNetwork({ type: 'challenge-response', ...response });
+    const onCancelDuel = (challengeId: string): void =>
+      this.sendNetwork({ type: 'challenge-cancel', challengeId });
+    const onCombatAction = (action: 'basic-attack' | 'skill-2', targetId: string): void =>
+      this.sendNetwork({ type: 'attack', action, targetId });
+    this.events.on('request-duel', onRequestDuel);
+    this.events.on('respond-duel', onRespondDuel);
+    this.events.on('cancel-duel', onCancelDuel);
+    this.events.on('pvp-attack', onCombatAction);
+    this.events.once('shutdown', () => {
+      this.events.off('request-duel', onRequestDuel);
+      this.events.off('respond-duel', onRespondDuel);
+      this.events.off('cancel-duel', onCancelDuel);
+      this.events.off('pvp-attack', onCombatAction);
+      this.stopMultiplayer();
+    });
 
     this.scene.launch('UI');
     this.events.once('shutdown', () => this.scene.stop('UI'));
     this.chunkManager.updateCenter(this.model.spawn.x, this.model.spawn.y);
+  }
+
+  private connectMultiplayer(): void {
+    if (
+      !this.player ||
+      !this.selectedCharacter ||
+      !this.activeUsername ||
+      this.networkSocket?.readyState === WebSocket.CONNECTING ||
+      this.networkSocket?.readyState === WebSocket.OPEN
+    ) {
+      return;
+    }
+    this.accountReady = false;
+    this.statusMessage = 'Đang kết nối PvP...';
+    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const socket = new WebSocket(`${protocol}//${location.host}/ws`);
+    this.networkSocket = socket;
+    socket.addEventListener('open', () => {
+      if (this.networkSocket !== socket || !this.player || !this.selectedCharacter) return;
+      this.sendNetwork({
+        type: 'join',
+        username: this.activeUsername,
+        characterId: this.selectedCharacter.id,
+        x: this.player.fx,
+        y: this.player.fy,
+        direction: this.player.direction
+      });
+    });
+    socket.addEventListener('message', (event: MessageEvent<string>) => {
+      let message: ServerPvPMessage;
+      try {
+        message = JSON.parse(event.data) as ServerPvPMessage;
+      } catch (error) {
+        console.error('[PvP] Không đọc được phản hồi WebSocket.', error);
+        this.statusMessage = 'Dữ liệu phản hồi PvP không hợp lệ.';
+        return;
+      }
+      this.handleNetworkMessage(message);
+    });
+    socket.addEventListener('error', () => {
+      this.statusMessage = 'Không thể kết nối máy chủ PvP.';
+      this.events.emit('pvp-message', this.statusMessage);
+    });
+    socket.addEventListener('close', () => {
+      if (this.networkSocket !== socket) return;
+      this.networkSocket = undefined;
+      this.positionSync?.remove();
+      this.positionSync = undefined;
+      this.accountReady = true;
+      this.activeDuel = undefined;
+      this.syncLocalNameplate();
+      this.statusMessage = 'Mất kết nối PvP; đang chơi ngoại tuyến.';
+      this.events.emit('duel-ended', { message: this.statusMessage, winnerId: null });
+      this.events.emit('pvp-message', this.statusMessage);
+      this.syncRemotePlayers([]);
+    });
+  }
+
+  private stopMultiplayer(): void {
+    this.positionSync?.remove();
+    this.positionSync = undefined;
+    const socket = this.networkSocket;
+    this.networkSocket = undefined;
+    if (socket && socket.readyState < WebSocket.CLOSING) socket.close(1000, 'Scene shutdown');
+    this.syncRemotePlayers([]);
+  }
+
+  private sendNetwork(message: ClientPvPMessage): void {
+    if (this.networkSocket?.readyState !== WebSocket.OPEN) {
+      this.statusMessage = 'Chưa kết nối máy chủ PvP.';
+      this.events.emit('pvp-message', this.statusMessage);
+      return;
+    }
+    this.networkSocket.send(JSON.stringify(message));
+  }
+
+  private handleNetworkMessage(message: ServerPvPMessage): void {
+    switch (message.type) {
+      case 'joined':
+        this.syncRemotePlayers(message.players);
+        if (this.player) {
+          const position = this.findFreeNetworkPosition(message.player.x, message.player.y);
+          this.player.setWorldTilePosition(position.x, position.y);
+        }
+        this.accountReady = true;
+        this.statusMessage = '';
+        this.playerStats = message.stats;
+        this.syncLocalNameplate();
+        this.events.emit('pvp-stats', message.stats);
+        this.positionSync?.remove();
+        this.positionSync = this.time.addEvent({
+          delay: 100,
+          loop: true,
+          callback: () => {
+            if (!this.player || !this.accountReady) return;
+            this.sendNetwork({
+              type: 'position',
+              x: this.player.fx,
+              y: this.player.fy,
+              direction: this.player.direction
+            });
+          }
+        });
+        break;
+      case 'player-updated':
+        this.playerStats = message.stats;
+        this.syncLocalNameplate();
+        this.events.emit('pvp-stats', message.stats);
+        break;
+      case 'players':
+        this.syncRemotePlayers(message.players);
+        break;
+      case 'challenge-incoming':
+        this.events.emit('duel-challenge-incoming', message);
+        break;
+      case 'challenge-outgoing':
+        this.events.emit('duel-challenge-outgoing', message);
+        break;
+      case 'challenge-cancelled':
+        this.events.emit('duel-challenge-cancelled', message);
+        break;
+      case 'duel-start':
+        this.activeDuel = message.duel;
+        this.syncLocalNameplate();
+        this.selectedTarget = { id: message.duel.opponentId, name: message.duel.opponentName };
+        this.statusMessage = 'Tỷ thí bắt đầu!';
+        this.events.emit('duel-started', message.duel);
+        break;
+      case 'duel-update':
+        this.activeDuel = message.duel;
+        this.syncLocalNameplate();
+        this.events.emit('duel-updated', message);
+        break;
+      case 'duel-end':
+        this.activeDuel = undefined;
+        this.syncLocalNameplate();
+        this.statusMessage = message.message;
+        this.events.emit('duel-ended', message);
+        break;
+      case 'error':
+        this.statusMessage = message.message;
+        this.events.emit('pvp-message', message.message);
+        break;
+    }
+  }
+
+  private syncRemotePlayers(players: NetworkPlayer[]): void {
+    const validPlayers = players.filter(
+      (player) =>
+        Number.isFinite(player.x) &&
+        Number.isFinite(player.y) &&
+        player.x >= 0 &&
+        player.y >= 0 &&
+        player.x < this.model.width &&
+        player.y < this.model.height
+    );
+    const onlineIds = new Set(validPlayers.map((player) => player.id));
+    for (const [id, remote] of this.remoteSprites) {
+      if (onlineIds.has(id)) continue;
+      remote.destroy();
+      this.remoteSprites.delete(id);
+      this.networkPlayers.delete(id);
+    }
+    for (const player of validPlayers) {
+      this.networkPlayers.set(player.id, player);
+      let remote = this.remoteSprites.get(player.id);
+      if (!remote) {
+        remote = new RemotePlayer(this, this.model, player);
+        this.remoteSprites.set(player.id, remote);
+      } else {
+        remote.sync(this.model, player);
+      }
+    }
+    this.events.emit('online-players', validPlayers.length);
+  }
+
+  private syncLocalNameplate(): void {
+    const character = this.selectedCharacter;
+    if (!character || !this.player) return;
+    const stats = this.playerStats ?? character.stats;
+    this.player.setNameplate(
+      character.name,
+      this.activeDuel?.yourHp ?? stats.maxHp,
+      this.activeDuel?.yourMaxHp ?? stats.maxHp
+    );
+  }
+
+  private findFreeNetworkPosition(x: number, y: number): Vec2 {
+    const originX = Math.floor(x);
+    const originY = Math.floor(y);
+    const occupiedTiles = new Set(
+      [...this.networkPlayers.values()].map((player) => `${Math.floor(player.x)},${Math.floor(player.y)}`)
+    );
+    for (let distance = 0; distance <= 8; distance++) {
+      for (let dx = -distance; dx <= distance; dx++) {
+        for (let dy = -distance; dy <= distance; dy++) {
+          if (Math.abs(dx) + Math.abs(dy) !== distance) continue;
+          const tx = originX + dx;
+          const ty = originY + dy;
+          const key = `${tx},${ty}`;
+          const centerX = tx + 0.5;
+          const centerY = ty + 0.5;
+          const radius = GAME.PLAYER_RADIUS;
+          const blocked =
+            this.model.isBlockedAt(centerX - radius, centerY - radius) ||
+            this.model.isBlockedAt(centerX + radius, centerY - radius) ||
+            this.model.isBlockedAt(centerX - radius, centerY + radius) ||
+            this.model.isBlockedAt(centerX + radius, centerY + radius);
+          if (blocked || occupiedTiles.has(key)) continue;
+          return { x: centerX, y: centerY };
+        }
+      }
+    }
+    return { x, y };
   }
 
   update(_time: number, delta: number): void {
@@ -124,7 +388,13 @@ export class GameScene extends Phaser.Scene {
     if (this.accountReady) this.player.update(delta, this.readDirection());
 
     const tile = this.player.tile;
-    this.chunkManager.updateCenter(tile.x, tile.y);
+    this.chunkManager.updateCenters([
+      tile,
+      ...[...this.networkPlayers.values()].map((remote) => ({
+        x: Math.floor(remote.x),
+        y: Math.floor(remote.y)
+      }))
+    ]);
     this.syncCloudCover();
     const debugHint = __DEBUG__ ? `  |  Debug: ${this.debugOn ? 'ON' : 'OFF'}` : '';
     const status = this.statusMessage ? `  |  ${this.statusMessage}` : '';
@@ -198,6 +468,11 @@ export class GameScene extends Phaser.Scene {
     this.createClickEffect();
     this.setupCamera();
     this.setupInput();
+    if (this.selectedCharacter) {
+      this.player.setAppearance(CHARACTERS[this.selectedCharacter.gender], this.selectedCharacter);
+      this.syncLocalNameplate();
+      this.connectMultiplayer();
+    }
   }
 
   private createClickEffect(): void {
@@ -437,15 +712,19 @@ export class GameScene extends Phaser.Scene {
 
     this.input.mouse?.disableContextMenu();
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      if (!this.accountReady) return;
       const target = this.targetAt(pointer.worldX, pointer.worldY);
       if (pointer.leftButtonDown()) {
         this.lastPointerTarget = '';
         this.draggingMap = false;
         this.events.emit('hide-character-menu');
-        if (target?.kind === 'character') {
+        if (target?.kind === 'remote-player') {
           this.selectedTarget = { id: target.id, name: target.name };
           this.statusMessage = '';
           this.events.emit('target-selected', this.selectedTarget);
+          if (this.activeDuel?.opponentId === target.id) {
+            this.attackRemotePlayer('basic-attack', target.id, target.name);
+          }
           return;
         }
         if (target?.kind === 'monster') {
@@ -460,8 +739,17 @@ export class GameScene extends Phaser.Scene {
       if (!pointer.rightButtonDown()) return;
       this.draggingMap = false;
       this.lastPointerTarget = '';
-      if (target?.kind === 'character') {
-        this.events.emit('show-character-menu', { x: pointer.x, y: pointer.y });
+      if (target?.kind === 'remote-player') {
+        if (this.activeDuel?.opponentId === target.id) {
+          this.attackRemotePlayer('skill-2', target.id, target.name);
+        } else {
+          this.events.emit('show-character-menu', {
+            x: pointer.x,
+            y: pointer.y,
+            targetId: target.id,
+            targetName: target.name
+          });
+        }
       } else if (target?.kind === 'monster') {
         this.issueCombatCommand('skill-2', target.id, target.name);
       } else {
@@ -503,20 +791,29 @@ export class GameScene extends Phaser.Scene {
   }
 
   private targetAt(x: number, y: number):
-    | { kind: 'character'; id: string; name: string; depth: number }
+    | { kind: 'remote-player'; id: string; name: string; depth: number }
     | { kind: 'monster'; id: string; name: string; depth: number }
     | undefined {
     const hits: Array<
-      | { kind: 'character'; id: string; name: string; depth: number }
+      | { kind: 'remote-player'; id: string; name: string; depth: number }
       | { kind: 'monster'; id: string; name: string; depth: number }
     > = [];
-    if (this.npc?.sprite.getBounds().contains(x, y)) {
-      hits.push({ kind: 'character', id: 'sample-character', name: 'Nhân vật mẫu', depth: this.npc.sprite.depth });
+    for (const [id, remote] of this.remoteSprites) {
+      if (!remote.sprite.getBounds().contains(x, y)) continue;
+      const player = this.networkPlayers.get(id);
+      if (player) hits.push({ kind: 'remote-player', id, name: player.name, depth: remote.sprite.depth });
     }
     if (this.monster?.sprite.getBounds().contains(x, y)) {
       hits.push({ kind: 'monster', id: this.monster.id, name: this.monster.name, depth: this.monster.sprite.depth });
     }
     return hits.sort((a, b) => b.depth - a.depth)[0];
+  }
+
+  private attackRemotePlayer(action: 'basic-attack' | 'skill-2', targetId: string, targetName: string): void {
+    this.player?.stopMoving();
+    this.selectedTarget = { id: targetId, name: targetName };
+    this.suppressKeyboardUntilRelease = true;
+    this.events.emit('pvp-attack', action, targetId);
   }
 
   private issueCombatCommand(action: 'basic-attack' | 'skill-2', targetId: string, targetName: string): void {

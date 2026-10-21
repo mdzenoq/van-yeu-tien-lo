@@ -1,8 +1,11 @@
+import { Server } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { defineConfig, loadEnv, type Plugin } from 'vite';
 import { NEXT_CHARACTER_EVOLUTION } from './src/types/accounts';
+import { statsForEvolution } from './src/types/pvp';
+import { attachPvpServer } from './src/server/pvp';
 
 import type {
   CharacterGender,
@@ -12,11 +15,13 @@ import type {
   UserAccount,
   UserStore
 } from './src/types/accounts';
+import type { CharacterStats } from './src/types/pvp';
 
 const genders = ['male', 'female'] as const satisfies readonly CharacterGender[];
 const species = ['snake'] as const satisfies readonly CharacterSpecies[];
 const evolutions = ['snake', 'red-snake', 'dragon'] as const satisfies readonly CharacterEvolution[];
 const usersFile = resolve(process.cwd(), 'users.json');
+let isCharacterDueling = (_characterId: string): boolean => false;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -24,6 +29,34 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isOneOf<T extends string>(value: unknown, options: readonly T[]): value is T {
   return typeof value === 'string' && options.includes(value as T);
+}
+
+interface StoredCharacterStats {
+  maxHp: number;
+  attack: number;
+  defense: number;
+  armorPen?: number;
+  armorPenetration?: number;
+}
+
+function isStoredCharacterStats(value: unknown): value is StoredCharacterStats {
+  if (isCharacterStats(value)) return true;
+  return (
+    isRecord(value) &&
+    typeof value.maxHp === 'number' &&
+    Number.isFinite(value.maxHp) &&
+    value.maxHp > 0 &&
+    typeof value.attack === 'number' &&
+    Number.isFinite(value.attack) &&
+    value.attack > 0 &&
+    typeof value.defense === 'number' &&
+    Number.isFinite(value.defense) &&
+    value.defense >= 0 &&
+    !('armorPen' in value) &&
+    typeof value.armorPenetration === 'number' &&
+    Number.isFinite(value.armorPenetration) &&
+    value.armorPenetration >= 0
+  );
 }
 
 function isStoredCharacter(value: unknown): boolean {
@@ -36,9 +69,29 @@ function isStoredCharacter(value: unknown): boolean {
     return false;
   }
   if ('baseSpecies' in value || 'evolution' in value) {
-    return isOneOf(value.baseSpecies, species) && isOneOf(value.evolution, evolutions);
+    return isOneOf(value.baseSpecies, species) &&
+      isOneOf(value.evolution, evolutions) &&
+      (!('stats' in value) || isStoredCharacterStats(value.stats));
   }
   return isOneOf(value.species, ['snake', 'dragon'] as const);
+}
+
+function isCharacterStats(value: unknown): value is CharacterStats {
+  return (
+    isRecord(value) &&
+    typeof value.maxHp === 'number' &&
+    Number.isFinite(value.maxHp) &&
+    value.maxHp > 0 &&
+    typeof value.attack === 'number' &&
+    Number.isFinite(value.attack) &&
+    value.attack > 0 &&
+    typeof value.defense === 'number' &&
+    Number.isFinite(value.defense) &&
+    value.defense >= 0 &&
+    typeof value.armorPen === 'number' &&
+    Number.isFinite(value.armorPen) &&
+    value.armorPen >= 0
+  );
 }
 
 function normalizeCharacter(value: unknown): PlayerCharacter {
@@ -51,7 +104,15 @@ function normalizeCharacter(value: unknown): PlayerCharacter {
       name: value.name as string,
       gender: value.gender as CharacterGender,
       baseSpecies: value.baseSpecies as CharacterSpecies,
-      evolution: value.evolution as CharacterEvolution
+      evolution: value.evolution as CharacterEvolution,
+      stats: isStoredCharacterStats(value.stats)
+        ? {
+            maxHp: value.stats.maxHp,
+            attack: value.stats.attack,
+            defense: value.stats.defense,
+            armorPen: value.stats.armorPen ?? value.stats.armorPenetration ?? 0
+          }
+        : statsForEvolution(value.evolution as CharacterEvolution)
     };
   }
   const oldSpecies = value.species;
@@ -60,7 +121,8 @@ function normalizeCharacter(value: unknown): PlayerCharacter {
     name: value.name as string,
     gender: value.gender as CharacterGender,
     baseSpecies: 'snake',
-    evolution: oldSpecies === 'dragon' ? 'dragon' : 'snake'
+    evolution: oldSpecies === 'dragon' ? 'dragon' : 'snake',
+    stats: statsForEvolution(oldSpecies === 'dragon' ? 'dragon' : 'snake')
   };
 }
 
@@ -157,8 +219,8 @@ function usersJsonApi(): Plugin {
             if (!user) {
               user = { username, characters: [] };
               store.users.push(user);
-              writeUsers(store);
             }
+            writeUsers(store);
             sendJson(response, 200, { user });
             return;
           }
@@ -174,6 +236,10 @@ function usersJsonApi(): Plugin {
               sendJson(response, 404, { error: 'Không tìm thấy nhân vật.' });
               return;
             }
+            if (isCharacterDueling(character.id)) {
+              sendJson(response, 409, { error: 'Không thể tiến hóa khi đang tỷ thí.' });
+              return;
+            }
             if (body.currentEvolution !== character.evolution) {
               sendJson(response, 409, { error: 'Tiến hóa của nhân vật vừa được thay đổi; hãy tải lại.' });
               return;
@@ -184,6 +250,7 @@ function usersJsonApi(): Plugin {
               return;
             }
             character.evolution = next;
+            character.stats = statsForEvolution(next);
             writeUsers(store);
             sendJson(response, 200, { character });
             return;
@@ -205,13 +272,19 @@ function usersJsonApi(): Plugin {
             sendJson(response, 400, { error: 'Giới tính nhân vật không hợp lệ.' });
             return;
           }
+          const name = typeof body.name === 'string' ? body.name.trim() : '';
+          if (!name || name.length > 20 || /[\u0000-\u001f]/.test(name)) {
+            sendJson(response, 400, { error: 'Tên nhân vật phải có từ 1 đến 20 ký tự.' });
+            return;
+          }
 
           const character: PlayerCharacter = {
             id: randomUUID(),
-            name: `Rắn ${user.characters.length + 1}`,
+            name,
             gender: body.gender as CharacterGender,
             baseSpecies: 'snake',
-            evolution: 'snake'
+            evolution: 'snake',
+            stats: statsForEvolution('snake')
           };
           user.characters.push(character);
           writeUsers(store);
@@ -230,11 +303,23 @@ function usersJsonApi(): Plugin {
   };
 }
 
+function pvpWebSocketPlugin(): Plugin {
+  return {
+    name: 'pvp-websocket-server',
+    configureServer(server) {
+      if (!(server.httpServer instanceof Server)) {
+        throw new Error('PvP WebSocket cần HTTP server của Vite dev server.');
+      }
+      isCharacterDueling = attachPvpServer(server.httpServer, readUsers);
+    }
+  };
+}
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, '.', '');
   return {
     base: './',
-    plugins: [usersJsonApi()],
+    plugins: [usersJsonApi(), pvpWebSocketPlugin()],
     server: { port: 5173, open: true },
     build: { chunkSizeWarningLimit: 2000 },
     define: {

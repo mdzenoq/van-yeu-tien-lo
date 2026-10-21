@@ -9,7 +9,7 @@ export const MAP_STREAM_RADIUS = 8; // bán kính ô tile (tính từ ô spawn) 
 export const CLOUD_COVER = {
   key: 'cloud-cover',
   url: 'assets/images/cloud.png',
-  scale: 8,
+  scale: 7,
   spacing: 96,
   alpha: 0.45
 } as const;
