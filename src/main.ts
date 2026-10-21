@@ -4,6 +4,20 @@ import { GameScene } from './scenes/GameScene';
 import { UIScene } from './scenes/UIScene';
 import { CURSOR } from './config';
 
+let devToolsWarningLogged = false;
+const reportDockedDevTools = (): void => {
+  const dockedRight = window.outerWidth - window.innerWidth > 180;
+  const dockedBottom = window.outerHeight - window.innerHeight > 180;
+  if ((dockedRight || dockedBottom) && !devToolsWarningLogged) {
+    devToolsWarningLogged = true;
+    console.error('[Game] Có vẻ DevTools đang mở. Trình duyệt không hỗ trợ phát hiện trạng thái này một cách chắc chắn.');
+  }
+};
+
+reportDockedDevTools();
+window.addEventListener('resize', reportDockedDevTools);
+const devToolsCheckInterval = window.setInterval(reportDockedDevTools, 1500);
+
 if (!__DEBUG__) {
   window.addEventListener(
     'contextmenu',
@@ -40,6 +54,10 @@ const game = new Phaser.Game({
     autoCenter: Phaser.Scale.CENTER_BOTH
   },
   scene: [BootScene, GameScene, UIScene]
+});
+game.events.once(Phaser.Core.Events.DESTROY, () => {
+  window.clearInterval(devToolsCheckInterval);
+  window.removeEventListener('resize', reportDockedDevTools);
 });
 
 game.events.once(Phaser.Core.Events.READY, () => {

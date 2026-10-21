@@ -1,13 +1,13 @@
 # Iso Game — Phaser 4.2.1 + TypeScript + Vite
 
-Game isometric dùng **1 file map Tiled (.json)**. Tileset là file **.tsx** (external) trỏ tới ảnh **.png**; game tự đọc .tsx, nạp PNG rồi gắn vào map.
+Game isometric dùng map Tiled finite (`.json`) làm nguồn. Trước khi chạy dev server hoặc build, script sinh manifest nhẹ và payload JSON riêng cho từng ô; trình duyệt không tải map JSON nguồn. Tileset là file `.tsx` (external) trỏ tới ảnh `.png`; game đọc TSX và nạp ảnh một lần vào texture cache.
 
 ## Chạy
 
 ```bash
 npm install
 npm run dev        # http://localhost:5173
-npm run build      # tsc --noEmit + vite build -> dist/
+npm run build      # sinh payload vùng + tsc --noEmit + vite build -> dist/
 ```
 
 Phải chạy qua server (Vite/dev server hoặc `npm run preview`); mở thẳng `index.html` bằng `file://` sẽ không load được asset.
@@ -17,7 +17,8 @@ Phải chạy qua server (Vite/dev server hoặc `npm run preview`); mở thẳn
 | Phím / chuột | Tác dụng |
 |---|---|
 | WASD / mũi tên | Đi theo hướng màn hình (lên/xuống/trái/phải) |
-| Click chuột trái | Hiện hiệu ứng click tại con trỏ và tự tìm đường (BFS 8 hướng) tới ô được click |
+| Click chuột trái | Đi tới vị trí click bằng BFS trong vùng đang tải |
+| Giữ chuột trái và rê | Liên tục đổi đích theo vị trí con trỏ |
 | Cuộn chuột | Zoom 1x–4x |
 | G | Bật/tắt debug (ô bị chặn màu đỏ, ô người chơi đang đứng) |
 | Nút skin rắn/rồng | Mặc hoặc tháo skin tương ứng; có thể thêm cấu hình sheet trong `SPRITE_SKINS` |
@@ -30,26 +31,30 @@ Con trỏ web dùng `public/assets/images/cursor.png`; chỉnh `CURSOR.scale` tr
 
 Đặt `DEBUG=false` trong `.env` để ẩn/tắt debug trong game, chặn chuột phải và một số phím tắt DevTools/trang nguồn, đồng thời giữ con trỏ tùy chỉnh khi rê lên nút skin. Đây chỉ là hạn chế thao tác phổ biến phía trình duyệt, không thể bảo vệ mã hoặc ngăn hoàn toàn DevTools; muốn bật debug thì đặt `DEBUG=true` hoặc xóa biến này rồi khởi động/build lại.
 
+Game ghi `console.error` một lần nếu phát hiện chênh lệch kích thước cửa sổ thường gặp khi DevTools được dock. Đây chỉ là heuristic của trình duyệt: không phát hiện được mọi kiểu mở F12 (ví dụ DevTools tách cửa sổ) và có thể khác nhau theo browser.
+
 ## Cấu trúc
 
 ```
 public/assets/
-  maps/map.json            <- map Tiled (THAY FILE NÀY)
-  tilesets/iso_tiles.tsx   <- tileset external
-  tilesets/iso_tiles.png   <- ảnh của tileset (đường dẫn lấy từ .tsx)
-  sprites/player.png
+  maps/tay-do.json         <- map Tiled nguồn (đổi MAP_URL nếu thay map)
+  map-stream/tay-do/       <- payload được sinh tự động, không commit
+  tilesets/*.tsx           <- tileset external
+  tilesets/*.png           <- ảnh tileset theo đường dẫn trong TSX
 src/
   config.ts                <- MAP_URL, tốc độ, zoom...
   loaders/tilesets.ts      <- đọc .tsx / tileset embedded
-  map/MapModel.ts          <- va chạm, spawn, tìm đường, công thức chiếu iso
+  map/MapModel.ts          <- metadata, collision và BFS trong vùng đang tải
+  map/ChunkManager.ts      <- tải, cache, loại response cũ, giới hạn vùng active
+  map/StreamedMap.ts       <- kiểu dữ liệu manifest/cell
   entities/Player.ts
   scenes/{Boot,Game,UI}Scene.ts
-tools/generate_sample_assets.py   <- sinh asset mẫu (cần pillow)
+tools/build-map-stream.mjs <- chuyển map nguồn thành manifest và cell payloads
 ```
 
 ## Thay map của bạn
 
-1. Copy map vào `public/assets/maps/map.json` (hoặc đổi `MAP_URL` trong `src/config.ts`).
+1. Copy finite map vào `public/assets/maps/` và đổi `MAP_URL` trong `src/config.ts`.
 2. Copy các `.tsx` + `.png` sao cho đường dẫn **tương đối từ map.json tới .tsx** và **từ .tsx tới .png** vẫn đúng (Tiled tự ghi sẵn).
 3. Yêu cầu của map trong Tiled:
    - Orientation: **Isometric**; **không** bật Infinite.
@@ -67,10 +72,16 @@ tools/generate_sample_assets.py   <- sinh asset mẫu (cần pillow)
 | Tile Layer | `above` = true | Luôn vẽ trên người chơi |
 | Object Layer | object tên `spawn` (Point) | Vị trí xuất phát (không có thì dùng giữa map) |
 
-Layer không có `sorted`/`above` được vẽ bằng Tilemap Layer của Phaser, nằm dưới người chơi (hợp với nền đất).
+Tile layer được vẽ từ GID của các cell active; `sorted`/`above`, opacity, tileset offset và các object tile được giữ theo metadata Tiled.
+
+`npm run dev` và `npm run build` tự chạy `tools/build-map-stream.mjs`. Script đọc `MAP_URL`, tạo `manifest.json` cùng các file `cells/x_y.json` trong `public/assets/map-stream/<map-id>/`; thư mục sinh này được ignore và không cần commit. Khi đổi map, đặt đúng nguồn và tileset paths rồi chạy một trong các lệnh trên để sinh lại dữ liệu.
+
+`MAP_STREAM_RADIUS` trong `src/config.ts` là bán kính tính theo ô tile: giá trị `3` tải tối đa vùng 7×7 (49 ô), đổi thành `5` để tải 11×11 hoặc `10` để tải 21×21. Chỉ ô trong vùng này được dựng và dùng collision; bán kính lớn hơn tạo nhiều request ô hơn. Object trong object layer được index vào mọi ô mà bounding box của nó giao nhau, sau đó client gộp theo layer/id để không vẽ hoặc va chạm trùng. Các texture tileset không bị gỡ khi vùng thay đổi. Chỉnh `CLOUD_COVER.scale`, `spacing` và `alpha` để điều chỉnh mây; ảnh được lặp quanh viewport để che bên ngoài vùng active và lấn vào mép khoảng nửa ô. BFS click-to-move chỉ biết collision trong vùng hiện tại; hãy click tiếp khi đã di chuyển gần hơn tới đích. Khi vùng mới tải, vùng cũ vẫn hoạt động cho đến lúc vùng mới hợp lệ được áp dụng, tránh khoảng trống collision; response lỗi được thử lại và response cũ bị bỏ qua.
+
+Để kiểm tra streaming trong Chrome DevTools → Network, bật **Disable cache**, tải lại game và lọc `map-stream`: ban đầu phải thấy `manifest.json` cùng tối đa `(2 × MAP_STREAM_RADIUS + 1)²` file `cells/<x>_<y>.json`; không được có request tới `assets/maps/tay-do.json`. Di chuyển qua ranh giới tile sẽ chỉ yêu cầu các ô mới chưa có trong cache. Ở mép map, số request nhỏ hơn do tọa độ ngoài map bị loại.
 
 ## Lưu ý
 
-- Code được viết theo tài liệu/mã nguồn Phaser 4.2.1 (đã đối chiếu `IsometricWorldToTileXY`, `TilemapJSONFile`, skill tilemaps), nhưng **chưa chạy thử trong trình duyệt** ở môi trường tạo zip (không có mạng để `npm install`). Nếu `npm run typecheck` báo lỗi kiểu, gửi log lại để sửa.
-- Nếu tile vẽ bằng Tilemap Layer và tile `sorted` lệch nhau trên map của bạn, đặt `sorted = true` cho mọi tile layer để toàn bộ do game tự vẽ.
-- Chỉ ô tile mới chặn đường; object layer không dùng làm vật cản.
+- Đã xác minh build và chạy thử luồng tải trong trình duyệt với Phaser 4.2.1; map nguồn không xuất hiện trong Network.
+- Tile layer `collides`/tile property `collides` và các rectangle/polygon của object layer đều được áp dụng khi collision; có thể đặt object layer `collides = false` để bỏ qua shape của layer đó.
+- Map finite isometric và layer tile có `data` dạng mảng được hỗ trợ; infinite/chunked Tiled map và base64/zlib chưa được hỗ trợ.

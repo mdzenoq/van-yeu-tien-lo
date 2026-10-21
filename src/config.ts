@@ -1,9 +1,19 @@
 // Đường dẫn tính từ thư mục public/ (Vite phục vụ ở gốc, base './' khi build).
-export const MAP_URL = 'assets/maps/map-sample.json';
+export const MAP_URL = 'assets/maps/tay-do.json';
+export const MAP_STREAM_ID = MAP_URL.split('/').pop()?.replace(/\.json$/i, '') ?? 'map';
+export const MAP_STREAM_BASE_URL = `assets/map-stream/${MAP_STREAM_ID}`;
+export const MAP_STREAM_RADIUS = 7;
+
+export const CLOUD_COVER = {
+  key: 'cloud-cover',
+  url: 'assets/images/cloud.png',
+  scale: 8,
+  spacing: 96,
+  alpha: 0.45
+} as const;
 
 export const KEY = {
-  MAP_RAW: 'map-raw',
-  MAP: 'map'
+  MAP_MANIFEST: 'map-manifest'
 } as const;
 
 export interface CharacterDef {
@@ -25,8 +35,8 @@ export const CHARACTERS: Record<'male' | 'female', CharacterDef> = {
 export const SKIN_DIRECTIONS = ['W', 'WD', 'D', 'SD', 'S', 'SA', 'A', 'AW'] as const;
 
 export const CLICK_EFFECT = {
-  key: 'click-effect',
-  url: 'assets/sprites/click.png',
+  key: 'click_effect',
+  url: 'assets/sprites/click_effect.png',
   frameWidth: 32,
   frameHeight: 32,
   frameCount: 6
@@ -67,6 +77,6 @@ export const GAME = {
   ZOOM: 2,
   MIN_ZOOM: 1,
   MAX_ZOOM: 4,
-  SPEED_PX: 150, // tốc độ di chuyển trên màn hình (pixel/giây)
+  SPEED_PX: 105, // tốc độ di chuyển trên màn hình (pixel/giây)
   PLAYER_RADIUS: 0.22 // bán kính va chạm, tính theo đơn vị tile
 } as const;

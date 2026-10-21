@@ -2,6 +2,9 @@ import Phaser from 'phaser';
 import { GAME, SPRITE_SKINS, type CharacterDef, type SpriteSkinId } from '../config';
 import type { MapModel, Vec2 } from '../map/MapModel';
 
+const DIRECTION_SECTOR = Math.PI / 4;
+const DIRECTION_HYSTERESIS = Math.PI / 24;
+
 export class Player {
   readonly sprite: Phaser.GameObjects.Sprite;
   fx: number;
@@ -110,11 +113,15 @@ export class Player {
 
   private updateDirection(x: number, y: number): void {
     if (x === 0 && y === 0) return;
-    const horizontal = Math.sign(x);
-    const vertical = Math.sign(y);
-    if (vertical < 0) this.directionIndex = horizontal > 0 ? 1 : horizontal < 0 ? 7 : 0;
-    else if (vertical > 0) this.directionIndex = horizontal > 0 ? 3 : horizontal < 0 ? 5 : 4;
-    else this.directionIndex = horizontal > 0 ? 2 : 6;
+    const angle = (Math.atan2(x, -y) + Math.PI * 2) % (Math.PI * 2);
+    const nextDirection = Math.round(angle / DIRECTION_SECTOR) % 8;
+    let angleFromCurrent = angle - this.directionIndex * DIRECTION_SECTOR;
+    if (angleFromCurrent > Math.PI) angleFromCurrent -= Math.PI * 2;
+    else if (angleFromCurrent < -Math.PI) angleFromCurrent += Math.PI * 2;
+
+    if (Math.abs(angleFromCurrent) >= DIRECTION_SECTOR / 2 + DIRECTION_HYSTERESIS) {
+      this.directionIndex = nextDirection;
+    }
   }
 
   private playSkinAnimation(): void {

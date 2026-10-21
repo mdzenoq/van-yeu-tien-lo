@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { SPRITE_SKINS, type SpriteSkinId } from '../config';
+import { MAP_STREAM_RADIUS, SPRITE_SKINS, type SpriteSkinId } from '../config';
 
 /** HUD chạy song song với GameScene, có camera riêng nên không bị ảnh hưởng bởi zoom. */
 export class UIScene extends Phaser.Scene {
@@ -47,8 +47,9 @@ export class UIScene extends Phaser.Scene {
     game.events.on('skin-changed', onSkinChanged);
 
     const onHud = (line: string): void => {
+      const diameter = MAP_STREAM_RADIUS * 2 + 1;
       text.setText([
-        'WASD / mũi tên: di chuyển  |  Click chuột: đi tới ô  |  Cuộn chuột: zoom  |  G: debug',
+        `WASD / mũi tên: di chuyển  |  Click: đi tới ô trong vùng ${diameter}×${diameter}  |  Cuộn chuột: zoom  |  G: debug`,
         line,
         `FPS: ${Math.round(this.game.loop.actualFps)}`
       ]);

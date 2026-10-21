@@ -1,14 +1,21 @@
 import Phaser from 'phaser';
-import { CHARACTERS, CLICK_EFFECT, KEY, MAP_URL, SPRITE_SKINS } from '../config';
+import {
+  CHARACTERS,
+  CLICK_EFFECT,
+  CLOUD_COVER,
+  KEY,
+  MAP_STREAM_BASE_URL,
+  MAP_URL,
+  SPRITE_SKINS
+} from '../config';
 import { externalTilesetUrls, resolveTilesets, tsxCacheKey, type ResolvedTileset } from '../loaders/tilesets';
-import type { TiledMap } from '../types/tiled';
+import type { StreamedMapManifest } from '../map/StreamedMap';
 
 /**
  * Luồng nạp:
- *  1) map.json + sprite người chơi
- *  2) các file .tsx mà map tham chiếu (Phaser không tự đọc tileset external)
- *  3) ảnh PNG của từng tileset (đường dẫn lấy từ .tsx)
- *  4) gộp tileset vào JSON, đăng ký vào tilemap cache rồi chạy GameScene
+ *  1) manifest nhẹ (không chứa mảng GID/object của map)
+ *  2) các file .tsx và ảnh tileset
+ *  3) GameScene yêu cầu các ô gần spawn
  */
 export class BootScene extends Phaser.Scene {
   private bar!: Phaser.GameObjects.Graphics;
@@ -22,14 +29,15 @@ export class BootScene extends Phaser.Scene {
     this.bar = this.add.graphics();
     this.load.on(Phaser.Loader.Events.PROGRESS, (value: number) => this.drawProgress(value));
     this.load.on(Phaser.Loader.Events.FILE_LOAD_ERROR, (file: Phaser.Loader.File) => {
-      if (file.key === SPRITE_SKINS.dragon.key || file.key === CLICK_EFFECT.key) {
+      if (file.key === SPRITE_SKINS.dragon.key || file.key === CLICK_EFFECT.key || file.key === CLOUD_COVER.key) {
         console.warn(`[Boot] Bỏ qua asset tùy chọn không tải được: ${file.src}`);
         return;
       }
       this.fail(`Không tải được file: ${file.src}`);
     });
-    this.load.json(KEY.MAP_RAW, MAP_URL);
+    this.load.json(KEY.MAP_MANIFEST, `${MAP_STREAM_BASE_URL}/manifest.json`);
     for (const c of Object.values(CHARACTERS)) this.load.image(c.key, c.url);
+    this.load.image(CLOUD_COVER.key, CLOUD_COVER.url);
     this.load.spritesheet(CLICK_EFFECT.key, CLICK_EFFECT.url, {
       frameWidth: CLICK_EFFECT.frameWidth,
       frameHeight: CLICK_EFFECT.frameHeight
@@ -44,32 +52,32 @@ export class BootScene extends Phaser.Scene {
 
   create(): void {
     if (this.failed) return;
-    const raw = this.cache.json.get(KEY.MAP_RAW) as TiledMap | undefined;
-    if (!raw || !Array.isArray(raw.layers) || !Array.isArray(raw.tilesets)) {
-      this.fail(`File map không hợp lệ: ${MAP_URL}`);
+    const manifest = this.cache.json.get(KEY.MAP_MANIFEST) as StreamedMapManifest | undefined;
+    if (!manifest || !Array.isArray(manifest.layers) || !Array.isArray(manifest.tilesets)) {
+      this.fail(`Manifest map không hợp lệ: ${MAP_STREAM_BASE_URL}/manifest.json`);
       return;
     }
-    if (raw.orientation !== 'isometric') {
-      this.fail(`Map phải có Orientation = Isometric (hiện tại: ${raw.orientation}).`);
+    if (manifest.orientation !== 'isometric') {
+      this.fail(`Map phải có Orientation = Isometric (hiện tại: ${manifest.orientation}).`);
       return;
     }
-    if (raw.infinite) {
+    if (manifest.infinite) {
       this.fail('Map "Infinite" chưa được hỗ trợ. Tắt Infinite trong Map Properties của Tiled.');
       return;
     }
 
-    for (const url of externalTilesetUrls(raw, MAP_URL)) {
+    for (const url of externalTilesetUrls(manifest, MAP_URL)) {
       const key = tsxCacheKey(url);
       if (!this.cache.xml.exists(key)) this.load.xml(key, url);
     }
-    this.runLoader(() => this.loadTilesetImages(raw));
+    this.runLoader(() => this.loadTilesetImages(manifest));
   }
 
-  private loadTilesetImages(raw: TiledMap): void {
+  private loadTilesetImages(manifest: StreamedMapManifest): void {
     if (this.failed) return;
     let tilesets: ResolvedTileset[];
     try {
-      tilesets = resolveTilesets(raw, MAP_URL, (key) => this.cache.xml.get(key) as Document | undefined);
+      tilesets = resolveTilesets(manifest, MAP_URL, (key) => this.cache.xml.get(key) as Document | undefined);
     } catch (e) {
       this.fail((e as Error).message);
       return;
@@ -77,15 +85,13 @@ export class BootScene extends Phaser.Scene {
     for (const ts of tilesets) {
       if (!this.textures.exists(ts.textureKey)) this.load.image(ts.textureKey, ts.imageUrl);
     }
-    this.runLoader(() => this.finish(raw, tilesets));
+    this.runLoader(() => this.finish(manifest, tilesets));
   }
 
-  private finish(raw: TiledMap, tilesets: ResolvedTileset[]): void {
+  private finish(manifest: StreamedMapManifest, tilesets: ResolvedTileset[]): void {
     if (this.failed) return;
     for (const ts of tilesets) if (ts.transColor) this.applyColorKey(ts);
-    const merged: TiledMap = { ...raw, tilesets: tilesets.map((t) => t.json) };
-    if (this.cache.tilemap.exists(KEY.MAP)) this.cache.tilemap.remove(KEY.MAP);
-    this.cache.tilemap.add(KEY.MAP, { format: Phaser.Tilemaps.Formats.TILED_JSON, data: merged });
+    this.registry.set(KEY.MAP_MANIFEST, manifest);
     this.registry.set('tilesets', tilesets);
     this.scene.start('Game');
   }
