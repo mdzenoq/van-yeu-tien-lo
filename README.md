@@ -17,13 +17,20 @@ Phải chạy qua server (Vite/dev server hoặc `npm run preview`); mở thẳn
 | Phím / chuột | Tác dụng |
 |---|---|
 | WASD / mũi tên | Đi theo hướng màn hình (lên/xuống/trái/phải) |
-| Click chuột trái | Đi tới vị trí click bằng BFS trong vùng đang tải |
+| Click chuột trái lên map | Đi tới vị trí click bằng BFS trong vùng đang tải; hiệu ứng click nằm dưới nhân vật |
 | Giữ chuột trái và rê | Liên tục đổi đích theo vị trí con trỏ |
+| Click trái nhân vật khác | Chọn mục tiêu |
+| Chuột phải nhân vật khác | Mở menu Tỷ thí / Theo sau |
+| Click trái quái mẫu | Phát lệnh đánh thường |
+| Chuột phải quái mẫu | Dừng chạy và phát lệnh kỹ năng 2 |
+| Chuột phải map | Dừng đường chạy hiện tại |
 | Cuộn chuột | Zoom 1x–4x |
 | G | Bật/tắt debug (ô bị chặn màu đỏ, ô người chơi đang đứng) |
 | Nút skin rắn/rồng | Mặc hoặc tháo skin tương ứng; có thể thêm cấu hình sheet trong `SPRITE_SKINS` |
 
 Sprite sheet skin dùng ô 128×128, 8 hàng theo thứ tự W, WD, D, SD, S, SA, A, AW. `framesPerDirection` là số frame nằm ngang trên mỗi hàng. Ví dụ rồng có 10 frame/hướng cần ảnh 1280×1024 tại `public/assets/sprites/dragon_idle.png`; cập nhật config rồi đặt ảnh vào đúng đường dẫn.
+
+Nhân vật và quái trong bản mẫu phát sự kiện `target-selected` và `combat-command` trên event emitter của `GameScene`; lệnh chiến đấu có dạng `{ action: 'basic-attack' | 'skill-2', targetId }`. Đây là điểm nối cho hệ thống chiến đấu, chưa tự trừ máu hay thực hiện tỷ thí/theo sau.
 
 Hiệu ứng click dùng `public/assets/sprites/click.png`, sprite sheet ngang 6 frame, mỗi frame 32×32px.
 

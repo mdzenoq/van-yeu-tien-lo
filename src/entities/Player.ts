@@ -66,6 +66,10 @@ export class Player {
     this.path = path;
   }
 
+  stopMoving(): void {
+    this.path = [];
+  }
+
   /** dir: hướng theo MÀN HÌNH (x: -1/0/1, y: -1/0/1). Trả về true nếu đang di chuyển. */
   update(deltaMs: number, dir: Vec2): boolean {
     const step = (GAME.SPEED_PX * this.unit * deltaMs) / 1000;
@@ -129,7 +133,9 @@ export class Player {
     if (!skinId) return;
     const skin = SPRITE_SKINS[skinId];
     const key = `${skinId}-${skin.directions[this.directionIndex]}`;
-    if (this.sprite.anims.currentAnim?.key !== key) this.sprite.play(key);
+    if (this.sprite.anims.currentAnim?.key !== key || !this.sprite.anims.isPlaying) {
+      this.sprite.play(key);
+    }
   }
 
   /** Dịch chuyển theo vector world (pixel) -> đổi sang delta tile, tách trục để trượt dọc tường. */

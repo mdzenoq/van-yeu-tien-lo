@@ -10,6 +10,7 @@ import {
   type SpriteSkinId
 } from '../config';
 import { Npc } from '../entities/Npc';
+import { Monster } from '../entities/Monster';
 import { Player } from '../entities/Player';
 import type { ResolvedTileset } from '../loaders/tilesets';
 import { ChunkManager } from '../map/ChunkManager';
@@ -26,10 +27,15 @@ export class GameScene extends Phaser.Scene {
   private wasd?: Record<'W' | 'A' | 'S' | 'D', Phaser.Input.Keyboard.Key>;
   private clickEffect?: Phaser.GameObjects.Sprite;
   private lastPointerTarget = '';
+  private draggingMap = false;
+  private suppressKeyboardUntilRelease = false;
   private readonly cloudSprites: Phaser.GameObjects.Image[] = [];
   private cloudCoverSignature = '';
   private npc?: Npc;
   private npcTile?: Vec2;
+  private monster?: Monster;
+  private monsterTile?: Vec2;
+  private selectedTarget?: { id: string; name: string };
   private debugBlocked!: Phaser.GameObjects.Graphics;
   private debugCursor!: Phaser.GameObjects.Graphics;
   private debugOn = false;
@@ -43,12 +49,27 @@ export class GameScene extends Phaser.Scene {
     super('Game');
   }
 
+  private syncMonsterSprite(): void {
+    if (!this.monsterTile) return;
+    if (this.model.isTileLoaded(this.monsterTile.x, this.monsterTile.y)) {
+      if (!this.monster) this.monster = new Monster(this, this.model, this.monsterTile.x, this.monsterTile.y);
+    } else if (this.monster) {
+      this.monster.sprite.destroy();
+      this.monster = undefined;
+    }
+  }
+
   create(): void {
     this.tileObjectsByCell.clear();
     this.objectSprites.clear();
     this.player = undefined;
     this.npc = undefined;
     this.npcTile = undefined;
+    this.monster = undefined;
+    this.monsterTile = undefined;
+    this.selectedTarget = undefined;
+    this.draggingMap = false;
+    this.suppressKeyboardUntilRelease = false;
     this.initialSpawn = undefined;
     this.statusMessage = '';
     this.lastPointerTarget = '';
@@ -95,7 +116,7 @@ export class GameScene extends Phaser.Scene {
   update(_time: number, delta: number): void {
     if (!this.player) return;
     const pointer = this.input.activePointer;
-    if (pointer.leftButtonDown()) {
+    if (this.draggingMap && pointer.leftButtonDown()) {
       const worldPoint = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
       this.setMoveDestination(worldPoint.x, worldPoint.y, false);
     }
@@ -106,9 +127,10 @@ export class GameScene extends Phaser.Scene {
     this.syncCloudCover();
     const debugHint = __DEBUG__ ? `  |  Debug: ${this.debugOn ? 'ON' : 'OFF'}` : '';
     const status = this.statusMessage ? `  |  ${this.statusMessage}` : '';
+    const target = this.selectedTarget ? `  |  Mục tiêu: ${this.selectedTarget.name}` : '';
     this.events.emit(
       'hud',
-      `Tile: (${tile.x}, ${tile.y})  |  Zoom: ${(this.cameras.main.zoom * this.unit).toFixed(2)}${debugHint}${status}`
+      `Tile: (${tile.x}, ${tile.y})  |  Zoom: ${(this.cameras.main.zoom * this.unit).toFixed(2)}${debugHint}${target}${status}`
     );
 
     if (this.debugOn) {
@@ -122,6 +144,7 @@ export class GameScene extends Phaser.Scene {
     this.model.setActiveCells(cells);
     this.renderRegion(cells);
     this.syncNpcSprite();
+    this.syncMonsterSprite();
     this.drawBlockedOverlay();
     this.cloudCoverSignature = '';
     this.syncCloudCover();
@@ -152,8 +175,25 @@ export class GameScene extends Phaser.Scene {
       this.npcTile = npc;
       this.model.block(npc.x, npc.y);
       this.syncNpcSprite();
-      this.drawBlockedOverlay();
     }
+    const monsterStarts = [
+      { x: spawn.x + 2, y: spawn.y },
+      { x: spawn.x + 3, y: spawn.y },
+      { x: spawn.x, y: spawn.y + 2 },
+      { x: spawn.x, y: spawn.y - 2 },
+      { x: spawn.x - 2, y: spawn.y }
+    ];
+    for (const start of monsterStarts) {
+      const candidate = this.model.nearestFree(start.x, start.y);
+      const overlapsSpawn = candidate.x === spawn.x && candidate.y === spawn.y;
+      const overlapsNpc = this.npcTile && candidate.x === this.npcTile.x && candidate.y === this.npcTile.y;
+      if (overlapsSpawn || overlapsNpc) continue;
+      this.monsterTile = candidate;
+      this.model.block(candidate.x, candidate.y);
+      this.syncMonsterSprite();
+      break;
+    }
+    this.drawBlockedOverlay();
     this.createClickEffect();
     this.setupCamera();
     this.setupInput();
@@ -176,7 +216,7 @@ export class GameScene extends Phaser.Scene {
       .sprite(0, 0, CLICK_EFFECT.key)
       .setOrigin(0.5)
       .setScale(this.unit)
-      .setDepth(200000)
+      .setDepth(0)
       .setVisible(false);
     this.clickEffect.on(Phaser.Animations.Events.ANIMATION_COMPLETE, () => this.clickEffect?.setVisible(false));
   }
@@ -395,14 +435,46 @@ export class GameScene extends Phaser.Scene {
       if (__DEBUG__) keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.G).on('down', () => this.toggleDebug());
     }
 
+    this.input.mouse?.disableContextMenu();
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-      if (!pointer.leftButtonDown()) return;
+      const target = this.targetAt(pointer.worldX, pointer.worldY);
+      if (pointer.leftButtonDown()) {
+        this.lastPointerTarget = '';
+        this.draggingMap = false;
+        this.events.emit('hide-character-menu');
+        if (target?.kind === 'character') {
+          this.selectedTarget = { id: target.id, name: target.name };
+          this.statusMessage = '';
+          this.events.emit('target-selected', this.selectedTarget);
+          return;
+        }
+        if (target?.kind === 'monster') {
+          this.issueCombatCommand('basic-attack', target.id, target.name);
+          return;
+        }
+        this.draggingMap = true;
+        this.setMoveDestination(pointer.worldX, pointer.worldY, true);
+        return;
+      }
+
+      if (!pointer.rightButtonDown()) return;
+      this.draggingMap = false;
       this.lastPointerTarget = '';
-      this.setMoveDestination(pointer.worldX, pointer.worldY, true);
+      if (target?.kind === 'character') {
+        this.events.emit('show-character-menu', { x: pointer.x, y: pointer.y });
+      } else if (target?.kind === 'monster') {
+        this.issueCombatCommand('skill-2', target.id, target.name);
+      } else {
+        this.player?.stopMoving();
+        this.suppressKeyboardUntilRelease = true;
+        this.statusMessage = 'Đã dừng di chuyển.';
+        this.events.emit('hide-character-menu');
+      }
     });
 
     this.input.on('pointerup', () => {
       this.lastPointerTarget = '';
+      this.draggingMap = false;
     });
 
     this.input.on('wheel', (_pointer: Phaser.Input.Pointer, _objects: unknown, _dx: number, dy: number) => {
@@ -423,7 +495,38 @@ export class GameScene extends Phaser.Scene {
     const right = !!(cursor?.right.isDown || keys?.D.isDown);
     const up = !!(cursor?.up.isDown || keys?.W.isDown);
     const down = !!(cursor?.down.isDown || keys?.S.isDown);
+    if (this.suppressKeyboardUntilRelease) {
+      if (left || right || up || down) return { x: 0, y: 0 };
+      this.suppressKeyboardUntilRelease = false;
+    }
     return { x: (right ? 1 : 0) - (left ? 1 : 0), y: (down ? 1 : 0) - (up ? 1 : 0) };
+  }
+
+  private targetAt(x: number, y: number):
+    | { kind: 'character'; id: string; name: string; depth: number }
+    | { kind: 'monster'; id: string; name: string; depth: number }
+    | undefined {
+    const hits: Array<
+      | { kind: 'character'; id: string; name: string; depth: number }
+      | { kind: 'monster'; id: string; name: string; depth: number }
+    > = [];
+    if (this.npc?.sprite.getBounds().contains(x, y)) {
+      hits.push({ kind: 'character', id: 'sample-character', name: 'Nhân vật mẫu', depth: this.npc.sprite.depth });
+    }
+    if (this.monster?.sprite.getBounds().contains(x, y)) {
+      hits.push({ kind: 'monster', id: this.monster.id, name: this.monster.name, depth: this.monster.sprite.depth });
+    }
+    return hits.sort((a, b) => b.depth - a.depth)[0];
+  }
+
+  private issueCombatCommand(action: 'basic-attack' | 'skill-2', targetId: string, targetName: string): void {
+    this.player?.stopMoving();
+    this.selectedTarget = { id: targetId, name: targetName };
+    this.events.emit('target-selected', this.selectedTarget);
+    this.suppressKeyboardUntilRelease = true;
+    this.statusMessage = action === 'basic-attack' ? 'Đánh thường.' : 'Dùng kỹ năng 2.';
+    this.events.emit('combat-command', { action, targetId });
+    this.events.emit('hide-character-menu');
   }
 
   private cellKey(x: number, y: number): string {
@@ -444,7 +547,12 @@ export class GameScene extends Phaser.Scene {
 
   private playClickEffect(x: number, y: number): void {
     if (!this.clickEffect) return;
-    this.clickEffect.setPosition(x, y).setVisible(true).play(CLICK_EFFECT.key, true);
+    const tile = this.model.worldToTile(x, y);
+    this.clickEffect
+      .setPosition(x, y)
+      .setDepth(Math.floor(tile.x) + Math.floor(tile.y) + 0.5)
+      .setVisible(true)
+      .play(CLICK_EFFECT.key, true);
   }
 
   private setMoveDestination(worldX: number, worldY: number, showEffect: boolean): void {

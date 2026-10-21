@@ -71,7 +71,8 @@ game.events.once(Phaser.Core.Events.READY, () => {
       console.error('[Cursor] Không thể tạo canvas để thu nhỏ con trỏ.');
       return;
     }
-    context.imageSmoothingEnabled = false;
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = 'high';
     context.drawImage(image, 0, 0, canvas.width, canvas.height);
 
     const cursor = `url("${canvas.toDataURL('image/png')}") ${Math.round(CURSOR.hotspotX * CURSOR.scale)} ${Math.round(CURSOR.hotspotY * CURSOR.scale)}, auto`;
