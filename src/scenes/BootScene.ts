@@ -53,12 +53,23 @@ export class BootScene extends Phaser.Scene {
   create(): void {
     if (this.failed) return;
     const manifest = this.cache.json.get(KEY.MAP_MANIFEST) as StreamedMapManifest | undefined;
-    if (!manifest || !Array.isArray(manifest.layers) || !Array.isArray(manifest.tilesets)) {
+    if (
+      !manifest ||
+      !Array.isArray(manifest.layers) ||
+      !Array.isArray(manifest.tilesets)
+    ) {
       this.fail(`Manifest map không hợp lệ: ${MAP_STREAM_BASE_URL}/manifest.json`);
       return;
     }
-    if (manifest.orientation !== 'isometric') {
-      this.fail(`Map phải có Orientation = Isometric (hiện tại: ${manifest.orientation}).`);
+    if (manifest.orientation !== 'isometric' && manifest.orientation !== 'staggered') {
+      this.fail(`Map phải có Orientation = Isometric hoặc Staggered (hiện tại: ${manifest.orientation}).`);
+      return;
+    }
+    if (
+      manifest.orientation === 'staggered' &&
+      !['x', 'y'].includes(manifest.staggeraxis ?? '')
+    ) {
+      this.fail('Map Staggered phải có Stagger Axis là X hoặc Y.');
       return;
     }
     if (manifest.infinite) {

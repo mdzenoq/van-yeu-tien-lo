@@ -60,6 +60,8 @@ export interface TiledMap {
   tilewidth: number;
   tileheight: number;
   orientation: string;
+  staggeraxis?: 'x' | 'y';
+  staggerindex?: 'odd' | 'even';
   infinite?: boolean;
   layers: TiledLayer[];
   tilesets: TiledTileset[];

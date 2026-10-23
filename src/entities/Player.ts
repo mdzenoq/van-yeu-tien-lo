@@ -84,6 +84,10 @@ export class Player {
     return this.directionIndex;
   }
 
+  get hasPath(): boolean {
+    return this.path.length > 0;
+  }
+
   setWorldTilePosition(x: number, y: number): void {
     this.fx = x;
     this.fy = y;
@@ -105,10 +109,10 @@ export class Player {
 
     if (dir.x !== 0 || dir.y !== 0) {
       this.path = [];
-      // Trục dọc của màn hình isometric bị nén một nửa -> chuẩn hoá theo (x, y/2).
-      const len = Math.hypot(dir.x, dir.y * 0.5);
+      const verticalScale = this.model.orientation === 'staggered' ? 1 : 0.5;
+      const len = Math.hypot(dir.x, dir.y * verticalScale);
       const wx = (dir.x / len) * step;
-      const wy = ((dir.y * 0.5) / len) * step;
+      const wy = ((dir.y * verticalScale) / len) * step;
       this.updateDirection(wx, wy);
       this.moveWorld(wx, wy);
       if (wx !== 0) this.facingLeft = wx < 0;
@@ -117,12 +121,10 @@ export class Player {
       const target = this.path[0];
       const cx = target.x + 0.5;
       const cy = target.y + 0.5;
-      const dfx = cx - this.fx;
-      const dfy = cy - this.fy;
-      const hw = this.model.tileWidth / 2;
-      const hh = this.model.tileHeight / 2;
-      const wx = (dfx - dfy) * hw;
-      const wy = (dfx + dfy) * hh;
+      const current = this.model.tileToWorld(this.fx, this.fy);
+      const destination = this.model.tileToWorld(cx, cy);
+      const wx = destination.x - current.x;
+      const wy = destination.y - current.y;
       const dist = Math.hypot(wx, wy);
       this.updateDirection(wx, wy);
       if (dist <= step) {
@@ -130,9 +132,7 @@ export class Player {
         this.fy = cy;
         this.path.shift();
       } else {
-        const k = step / dist;
-        this.fx += dfx * k;
-        this.fy += dfy * k;
+        this.moveWorld((wx / dist) * step, (wy / dist) * step);
       }
       if (wx !== 0) this.facingLeft = wx < 0;
       moving = true;
@@ -168,8 +168,23 @@ export class Player {
 
   /** Dịch chuyển theo vector world (pixel) -> đổi sang delta tile, tách trục để trượt dọc tường. */
   private moveWorld(wdx: number, wdy: number): void {
-    const dfx = wdx / this.model.tileWidth + wdy / this.model.tileHeight;
-    const dfy = wdy / this.model.tileHeight - wdx / this.model.tileWidth;
+    const current = this.model.tileToWorld(this.fx, this.fy);
+    if (this.model.orientation === 'staggered') {
+      let worldX = current.x;
+      let worldY = current.y;
+      for (const [dx, dy] of [[wdx, 0], [0, wdy]] as const) {
+        const next = this.model.worldToTile(worldX + dx, worldY + dy);
+        if (this.blockedAt(next.x, next.y)) continue;
+        this.fx = next.x;
+        this.fy = next.y;
+        worldX += dx;
+        worldY += dy;
+      }
+      return;
+    }
+    const next = this.model.worldToTile(current.x + wdx, current.y + wdy);
+    const dfx = next.x - this.fx;
+    const dfy = next.y - this.fy;
     const nx = this.fx + dfx;
     if (!this.blockedAt(nx, this.fy)) this.fx = nx;
     const ny = this.fy + dfy;
@@ -179,6 +194,21 @@ export class Player {
   private blockedAt(fx: number, fy: number): boolean {
     const r = GAME.PLAYER_RADIUS;
     const m = this.model;
+    if (m.orientation === 'staggered') {
+      const world = m.tileToWorld(fx, fy);
+      const radiusX = r * m.tileWidth;
+      const radiusY = r * m.tileHeight / 2;
+      const blockedAtWorld = (x: number, y: number): boolean => {
+        const tile = m.worldToTile(x, y);
+        return m.isBlockedAt(tile.x, tile.y);
+      };
+      return (
+        blockedAtWorld(world.x - radiusX, world.y - radiusY) ||
+        blockedAtWorld(world.x + radiusX, world.y - radiusY) ||
+        blockedAtWorld(world.x - radiusX, world.y + radiusY) ||
+        blockedAtWorld(world.x + radiusX, world.y + radiusY)
+      );
+    }
     return (
       m.isBlockedAt(fx - r, fy - r) ||
       m.isBlockedAt(fx + r, fy - r) ||
@@ -192,7 +222,7 @@ export class Player {
     this.sprite.setPosition(p.x, p.y);
     this.sprite.setFlipX(this.activeEvolution ? false : this.facingLeft);
     // Cùng thang depth với tile "sorted": tx + ty + 1 là tâm tile.
-    this.sprite.setDepth(this.fx + this.fy);
+    this.sprite.setDepth(this.model.depthAt(this.fx, this.fy));
     this.syncNameplate();
   }
 
@@ -206,7 +236,7 @@ export class Player {
       this.nameplateColor,
       this.nameplateHp,
       this.nameplateMaxHp,
-      this.fx + this.fy
+      this.model.depthAt(this.fx, this.fy)
     );
   }
 }

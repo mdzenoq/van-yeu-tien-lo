@@ -14,6 +14,6 @@ export class Npc {
       .setOrigin(character.originX, character.originY)
       .setScale(unit * character.scaleX, unit * character.scaleY)
       .setFlipX(facingLeft)
-      .setDepth(tx + 0.5 + ty + 0.5);
+      .setDepth(model.depthAt(tx + 0.5, ty + 0.5));
   }
 }

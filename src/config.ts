@@ -1,15 +1,23 @@
 // Đường dẫn tính từ thư mục public/ (Vite phục vụ ở gốc, base './' khi build).
 import type { CharacterEvolution } from './types/accounts';
 
-export const MAP_URL = 'assets/maps/tay-do.json';
+// export const MAP_URL = 'assets/maps/tay-do.json';
+export const MAP_URL = 'assets/maps/thang-long.json';
 export const MAP_STREAM_ID = MAP_URL.split('/').pop()?.replace(/\.json$/i, '') ?? 'map';
 export const MAP_STREAM_BASE_URL = `assets/map-stream/${MAP_STREAM_ID}`;
-export const MAP_STREAM_RADIUS = 8; // bán kính ô tile (tính từ ô spawn) mà GameScene yêu cầu map stream tải về
+export const MAP_PREVIEW_URL = `assets/images/${MAP_STREAM_ID}.png`;
+
+// Load map trước
+export const MAP_STREAM_WIDTH_TILES = 22;
+export const MAP_STREAM_HEIGHT_TILES = 45;
 
 export const CLOUD_COVER = {
   key: 'cloud-cover',
   url: 'assets/images/cloud.png',
-  scale: 7,
+  // Che mây mờ, không che hết màn hình, nên để alpha thấp.
+  clearWidthTiles: 20,
+  clearHeightTiles: 40,
+  scale: 4,
   spacing: 96,
   alpha: 0.45
 } as const;
@@ -94,9 +102,10 @@ export const SPRITE_EVOLUTIONS: Record<
 
 export const GAME = {
   // Giá trị zoom/tốc độ ứng với tile 64px; game tự nhân theo tileWidth/64 của map.
-  ZOOM: 2,
+  ZOOM: 2.25,
   MIN_ZOOM: 1,
-  MAX_ZOOM: 4,
-  SPEED_PX: 105, // tốc độ di chuyển trên màn hình (pixel/giây)
+  MAX_ZOOM: 3,
+  ANIMATION_FPS: 15,
+  SPEED_PX: 100, // tốc độ di chuyển trên màn hình (pixel/giây)
   PLAYER_RADIUS: 0.22 // bán kính va chạm, tính theo đơn vị tile
 } as const;

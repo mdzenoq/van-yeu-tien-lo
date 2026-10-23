@@ -36,6 +36,9 @@ export class MapModel {
   readonly height: number;
   readonly tileWidth: number;
   readonly tileHeight: number;
+  readonly orientation: string;
+  readonly staggerAxis: 'x' | 'y';
+  private readonly staggerIndex: 'odd' | 'even';
   readonly spawn: Vec2;
 
   private readonly layersById = new Map<number, TiledLayer>();
@@ -50,6 +53,9 @@ export class MapModel {
     this.height = manifest.height;
     this.tileWidth = manifest.tilewidth;
     this.tileHeight = manifest.tileheight;
+    this.orientation = manifest.orientation;
+    this.staggerAxis = manifest.staggeraxis ?? 'y';
+    this.staggerIndex = manifest.staggerindex ?? 'odd';
     this.spawn = {
       x: Math.min(Math.max(manifest.spawn.x, 0), this.width - 1),
       y: Math.min(Math.max(manifest.spawn.y, 0), this.height - 1)
@@ -132,12 +138,56 @@ export class MapModel {
   }
 
   tileToWorld(fx: number, fy: number): Vec2 {
+    if (this.orientation === 'staggered') {
+      const col = fx - 0.5;
+      const row = fy - 0.5;
+      if (this.staggerAxis === 'y') {
+        return {
+          x: (col + 0.5 + this.staggerOffset(row)) * this.tileWidth,
+          y: (row + 0.5) * this.tileHeight / 2
+        };
+      }
+      return {
+        x: (col + 0.5) * this.tileWidth / 2,
+        y: (row + 0.5 + this.staggerOffset(col)) * this.tileHeight
+      };
+    }
     const hw = this.tileWidth / 2;
     const hh = this.tileHeight / 2;
     return { x: (fx - fy) * hw + hw, y: (fx + fy) * hh };
   }
 
+  tileToPreview(fx: number, fy: number): Vec2 {
+    const world = this.tileToWorld(fx, fy);
+    if (this.orientation !== 'staggered') {
+      return { x: world.x / this.tileWidth, y: world.y / this.tileHeight };
+    }
+    return this.staggerAxis === 'y'
+      ? { x: world.x / this.tileWidth, y: (2 * world.y) / this.tileHeight }
+      : { x: (2 * world.x) / this.tileWidth, y: world.y / this.tileHeight };
+  }
+
+  previewToTile(x: number, y: number): Vec2 {
+    const world =
+      this.orientation !== 'staggered'
+        ? { x: x * this.tileWidth, y: y * this.tileHeight }
+        : this.staggerAxis === 'y'
+          ? { x: x * this.tileWidth, y: (y * this.tileHeight) / 2 }
+          : { x: (x * this.tileWidth) / 2, y: y * this.tileHeight };
+    return this.worldToTile(world.x, world.y);
+  }
+
   worldToTile(wx: number, wy: number): Vec2 {
+    if (this.orientation === 'staggered') {
+      if (this.staggerAxis === 'y') {
+        const row = 2 * wy / this.tileHeight - 0.5;
+        const col = (wx - this.tileWidth / 2) / this.tileWidth - this.staggerOffset(row);
+        return { x: col + 0.5, y: row + 0.5 };
+      }
+      const col = 2 * wx / this.tileWidth - 0.5;
+      const row = (wy - this.tileHeight / 2) / this.tileHeight - this.staggerOffset(col);
+      return { x: col + 0.5, y: row + 0.5 };
+    }
     const hw = this.tileWidth / 2;
     const hh = this.tileHeight / 2;
     const u = (wx - hw) / hw;
@@ -146,6 +196,25 @@ export class MapModel {
   }
 
   worldBounds(margin = 128): { x: number; y: number; width: number; height: number } {
+    if (this.orientation === 'staggered') {
+      const cols = new Set([0, this.width - 1]);
+      const rows = new Set([0, this.height - 1]);
+      if (this.staggerAxis === 'x' && this.width > 1) cols.add(1);
+      if (this.staggerAxis === 'y' && this.height > 1) rows.add(1);
+      const centers = [...cols].flatMap((col) =>
+        [...rows].map((row) => this.tileToWorld(col + 0.5, row + 0.5))
+      );
+      const minCenterX = Math.min(...centers.map(({ x }) => x));
+      const maxCenterX = Math.max(...centers.map(({ x }) => x));
+      const minCenterY = Math.min(...centers.map(({ y }) => y));
+      const maxCenterY = Math.max(...centers.map(({ y }) => y));
+      return {
+        x: minCenterX - this.tileWidth / 2 - margin,
+        y: minCenterY - this.tileHeight / 2 - margin,
+        width: maxCenterX - minCenterX + this.tileWidth + margin * 2,
+        height: maxCenterY - minCenterY + this.tileHeight + margin * 2
+      };
+    }
     const hw = this.tileWidth / 2;
     const hh = this.tileHeight / 2;
     const minX = -(this.height - 1) * hw;
@@ -212,12 +281,125 @@ export class MapModel {
     return path.reverse();
   }
 
+  findPathToward(sx: number, sy: number, targetX: number, targetY: number): Vec2[] | null {
+    if (this.isBlocked(sx, sy)) return null;
+    const start = keyOf(sx, sy);
+    const previous = new Map<string, string>([[start, start]]);
+    const queue: Vec2[] = [{ x: sx, y: sy }];
+    let best = queue[0];
+    let bestDistance = this.distanceToTarget(best, targetX, targetY);
+
+    for (let head = 0; head < queue.length; head++) {
+      const current = queue[head];
+      const distance = this.distanceToTarget(current, targetX, targetY);
+      if (distance < bestDistance) {
+        best = current;
+        bestDistance = distance;
+      }
+      for (const [dx, dy] of DIRS) {
+        const x = current.x + dx;
+        const y = current.y + dy;
+        const key = keyOf(x, y);
+        if (previous.has(key) || this.isBlocked(x, y)) continue;
+        if (dx !== 0 && dy !== 0 && (this.isBlocked(current.x + dx, current.y) || this.isBlocked(current.x, current.y + dy))) {
+          continue;
+        }
+        previous.set(key, keyOf(current.x, current.y));
+        queue.push({ x, y });
+      }
+    }
+
+    if (best.x === sx && best.y === sy) return null;
+    const path: Vec2[] = [];
+    const goal = keyOf(best.x, best.y);
+    for (let current = goal; current !== start; current = previous.get(current)!) {
+      const [x, y] = current.split(',').map(Number);
+      path.push({ x, y });
+    }
+    return path.reverse();
+  }
+
+  private distanceToTarget(tile: Vec2, targetX: number, targetY: number): number {
+    const point = this.tileToWorld(tile.x + 0.5, tile.y + 0.5);
+    const target = this.tileToWorld(targetX + 0.5, targetY + 0.5);
+    return Math.hypot(point.x - target.x, point.y - target.y);
+  }
+
+  smoothPath(path: readonly Vec2[], start: Vec2): Vec2[] {
+    if (this.orientation !== 'staggered' || path.length < 2) return [...path];
+
+    const smoothed: Vec2[] = [];
+    let from = start;
+    let index = 0;
+    while (index < path.length) {
+      let furthest = index;
+      for (let candidate = path.length - 1; candidate > index; candidate--) {
+        const target = this.tileToWorld(path[candidate].x + 0.5, path[candidate].y + 0.5);
+        if (this.isWorldSegmentClear(from, target)) {
+          furthest = candidate;
+          break;
+        }
+      }
+      smoothed.push(path[furthest]);
+      from = this.tileToWorld(path[furthest].x + 0.5, path[furthest].y + 0.5);
+      index = furthest + 1;
+    }
+    return smoothed;
+  }
+
+  private isWorldSegmentClear(start: Vec2, end: Vec2): boolean {
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const distance = Math.hypot(dx, dy);
+    const sampleCount = Math.max(1, Math.ceil(distance * 8 / Math.min(this.tileWidth, this.tileHeight)));
+    const radiusX = 0.22 * this.tileWidth;
+    const radiusY = 0.22 * this.tileHeight / 2;
+    for (let sample = 0; sample <= sampleCount; sample++) {
+      const progress = sample / sampleCount;
+      const x = start.x + dx * progress;
+      const y = start.y + dy * progress;
+      for (const offsetX of [-radiusX, radiusX]) {
+        for (const offsetY of [-radiusY, radiusY]) {
+          const tile = this.worldToTile(x + offsetX, y + offsetY);
+          if (this.isBlockedAt(tile.x, tile.y)) return false;
+        }
+      }
+    }
+    return true;
+  }
+
   private isSolidGid(gid: number): boolean {
     const tileset = this.tilesetForGid(gid);
     return !!tileset && tileset.collidingIds.includes(gid - tileset.firstgid);
   }
 
+  depthAt(fx: number, fy: number): number {
+    return this.orientation === 'staggered' ? this.tileToWorld(fx, fy).y : fx + fy;
+  }
+
+  private staggerOffset(value: number): number {
+    const lower = Math.floor(value);
+    const fraction = value - lower;
+    const shifted = Math.abs(lower % 2) === (this.staggerIndex === 'odd' ? 1 : 0);
+    return (shifted ? 1 - fraction : fraction) * 0.5;
+  }
+
   private objectShape(object: TiledObject): Vec2[] | null {
+    if (this.orientation === 'staggered') {
+      const convert = (x: number, y: number): Vec2 => this.worldToTile(x, y);
+      if (object.polygon && object.polygon.length >= 3) {
+        return object.polygon.map((point) => convert(object.x + point.x, object.y + point.y));
+      }
+      if ((object.width ?? 0) > 0 && (object.height ?? 0) > 0) {
+        return [
+          convert(object.x, object.y),
+          convert(object.x + object.width!, object.y),
+          convert(object.x + object.width!, object.y + object.height!),
+          convert(object.x, object.y + object.height!)
+        ];
+      }
+      return null;
+    }
     const unit = this.tileHeight;
     if (object.polygon && object.polygon.length >= 3) {
       return object.polygon.map((point) => ({ x: (object.x + point.x) / unit, y: (object.y + point.y) / unit }));

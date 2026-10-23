@@ -1,8 +1,38 @@
 import Phaser from 'phaser';
-import { MAP_STREAM_RADIUS, SPRITE_EVOLUTIONS } from '../config';
-import { AccountScreen } from '../ui/AccountScreen';
+import { MAP_STREAM_HEIGHT_TILES, MAP_STREAM_WIDTH_TILES, SPRITE_EVOLUTIONS } from '../config';
 import { NEXT_CHARACTER_EVOLUTION, type CharacterEvolution, type PlayerCharacter } from '../types/accounts';
 import type { CharacterStats, DuelView, ServerPvPMessage } from '../types/pvp';
+import { AccountScreen } from '../ui/AccountScreen';
+
+interface MiniMapState {
+  width: number;
+  height: number;
+  imageUrl: string;
+}
+
+interface MiniMapLayout {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  mapX: number;
+  mapY: number;
+  mapWidth: number;
+  mapHeight: number;
+}
+
+interface MiniMapBounds {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+interface MiniMapMarkers {
+  player: { x: number; y: number };
+  others: Array<{ x: number; y: number; pk: boolean }>;
+  npc?: { x: number; y: number };
+}
 
 /** HUD chạy song song với GameScene, có camera riêng nên không bị ảnh hưởng bởi zoom. */
 export class UIScene extends Phaser.Scene {
@@ -11,6 +41,19 @@ export class UIScene extends Phaser.Scene {
   private challengeObjects: Phaser.GameObjects.GameObject[] = [];
   private activeDuel?: DuelView;
   private duelText?: Phaser.GameObjects.Text;
+  private miniMapState?: MiniMapState;
+  private miniMapMarkersState?: MiniMapMarkers;
+  private miniMapZoom = 1;
+  private miniMapImageUrl = '';
+  private miniMapSource?: HTMLImageElement | HTMLCanvasElement;
+  private miniMapCanvas?: HTMLCanvasElement;
+  private miniMapCanvasTexture?: Phaser.Textures.CanvasTexture;
+  private miniMapImage?: Phaser.GameObjects.Image;
+  private miniMapBackground?: Phaser.GameObjects.Graphics;
+  private miniMapFrame?: Phaser.GameObjects.Graphics;
+  private miniMapTerrain?: Phaser.GameObjects.Graphics;
+  private miniMapMarkers?: Phaser.GameObjects.Graphics;
+  private miniMapTitle?: Phaser.GameObjects.Text;
 
   constructor() {
     super('UI');
@@ -21,6 +64,12 @@ export class UIScene extends Phaser.Scene {
     this.evolutionObjects = [];
     this.challengeObjects = [];
     this.activeDuel = undefined;
+    this.miniMapZoom = 1;
+    this.miniMapImageUrl = '';
+    this.miniMapSource = undefined;
+    this.miniMapCanvas = undefined;
+    this.miniMapCanvasTexture = undefined;
+    this.miniMapImage = undefined;
     const text = this.add
       .text(10, 10, '', {
         fontFamily: 'monospace',
@@ -32,6 +81,70 @@ export class UIScene extends Phaser.Scene {
       .setDepth(1);
 
     const game = this.scene.get('Game');
+    this.miniMapState = undefined;
+    this.miniMapMarkersState = undefined;
+    this.miniMapBackground = this.add.graphics().setDepth(9).setScrollFactor(0);
+    this.miniMapFrame = this.add.graphics().setDepth(12).setScrollFactor(0);
+    this.miniMapTerrain = this.add.graphics().setDepth(11).setScrollFactor(0);
+    this.miniMapMarkers = this.add.graphics().setDepth(13).setScrollFactor(0);
+    this.miniMapTitle = this.add
+      .text(0, 0, 'BẢN ĐỒ', {
+        fontFamily: 'sans-serif',
+        fontSize: '11px',
+        color: '#d7e8f2'
+      })
+      .setDepth(14)
+      .setScrollFactor(0);
+    const onMiniMapState = (state: MiniMapState): void => {
+      this.miniMapState = state;
+      this.loadMiniMapImage(state.imageUrl);
+      this.drawMiniMap();
+    };
+    const onMiniMapMarkers = (markers: MiniMapMarkers): void => {
+      this.miniMapMarkersState = markers;
+      this.drawMiniMapMarkers();
+    };
+    const onMiniMapPointerDown = (pointer: Phaser.Input.Pointer): void => {
+      const layout = this.miniMapLayout();
+      const state = this.miniMapState;
+      if (!layout || !state) return;
+      const bounds = this.miniMapBounds(state);
+      if (!this.isInsideMiniMap(pointer.x, pointer.y, layout) || !pointer.leftButtonDown()) return;
+      const previewX = bounds.left + ((pointer.x - layout.mapX) / layout.mapWidth) * bounds.width;
+      const previewY = bounds.top + ((pointer.y - layout.mapY) / layout.mapHeight) * bounds.height;
+      if (previewX < 0 || previewY < 0 || previewX >= state.width || previewY >= state.height) return;
+      game.events.emit('minimap-move', { x: previewX, y: previewY });
+    };
+    const onMiniMapWheel = (
+      pointer: Phaser.Input.Pointer,
+      _objects: unknown,
+      _dx: number,
+      dy: number
+    ): void => {
+      const layout = this.miniMapLayout();
+      if (!layout || !this.isInsideMiniMap(pointer.x, pointer.y, layout)) return;
+      this.miniMapZoom = Phaser.Math.Clamp(this.miniMapZoom * (dy > 0 ? 0.8 : 1.25), 1, 12);
+      this.drawMiniMap();
+    };
+    game.events.on('minimap-map', onMiniMapState);
+    game.events.on('minimap-markers', onMiniMapMarkers);
+    this.input.on('pointerdown', onMiniMapPointerDown);
+    this.input.on('wheel', onMiniMapWheel);
+    this.scale.on(Phaser.Scale.Events.RESIZE, this.drawMiniMap, this);
+    game.events.emit('minimap-request');
+    this.events.once('shutdown', () => {
+      game.events.off('minimap-map', onMiniMapState);
+      game.events.off('minimap-markers', onMiniMapMarkers);
+      this.input.off('pointerdown', onMiniMapPointerDown);
+      this.input.off('wheel', onMiniMapWheel);
+      this.scale.off(Phaser.Scale.Events.RESIZE, this.drawMiniMap, this);
+      this.miniMapBackground?.destroy();
+      this.miniMapFrame?.destroy();
+      this.miniMapTerrain?.destroy();
+      this.miniMapMarkers?.destroy();
+      this.miniMapTitle?.destroy();
+      this.miniMapImage?.destroy();
+    });
     let activeUsername = '';
     let activeCharacter: PlayerCharacter | undefined;
     let evolving = false;
@@ -243,10 +356,9 @@ export class UIScene extends Phaser.Scene {
     game.events.on('duel-ended', onDuelEnded);
     game.events.on('pvp-message', onPvpMessage);
     const onHud = (line: string): void => {
-      const diameter = MAP_STREAM_RADIUS * 2 + 1;
       text.setText([
         `WASD / mũi tên: đi | Trái: chọn/đánh/đi | Phải: menu/dừng/skill 2 | Zoom: cuộn | G: debug`,
-        `Click map để đi trong vùng ${diameter}×${diameter}; giữ chuột trái để đổi đích`,
+        `Click map để đi trong vùng ${MAP_STREAM_WIDTH_TILES}×${MAP_STREAM_HEIGHT_TILES}; giữ chuột trái để đổi đích`,
         line,
         `FPS: ${Math.round(this.game.loop.actualFps)}`
       ]);
@@ -275,6 +387,168 @@ export class UIScene extends Phaser.Scene {
 
   update(): void {
     if (this.activeDuel) this.updateDuelText();
+  }
+
+  private miniMapLayout(): MiniMapLayout | undefined {
+    const state = this.miniMapState;
+    if (!state || state.width < 1 || state.height < 1) return undefined;
+    const size = Math.min(240, this.scale.width * 0.36, this.scale.height * 0.45);
+    const width = size;
+    const height = size;
+    const x = this.scale.width - width;
+    const y = 0;
+    const mapX = x + 8;
+    const mapY = y + 26;
+    const mapWidth = width - 16;
+    const mapHeight = height - 34;
+    return {
+      x,
+      y,
+      width,
+      height,
+      mapX,
+      mapY,
+      mapWidth,
+      mapHeight
+    };
+  }
+
+  private drawMiniMap(): void {
+    const state = this.miniMapState;
+    const layout = this.miniMapLayout();
+    const background = this.miniMapBackground;
+    const frame = this.miniMapFrame;
+    const terrain = this.miniMapTerrain;
+    if (!state || !layout || !background || !frame || !terrain) return;
+
+    background.clear();
+    background.fillStyle(0x07111c, 0.9).fillRoundedRect(layout.x, layout.y, layout.width, layout.height, 6);
+    frame.clear();
+    this.miniMapTitle?.setPosition(layout.x + 8, layout.y + 6);
+
+    terrain.clear();
+    const bounds = this.miniMapBounds(state);
+    if (this.miniMapSource && this.miniMapCanvas && this.miniMapCanvasTexture && this.miniMapImage) {
+      const canvas = this.miniMapCanvas;
+      canvas.width = Math.max(1, Math.round(layout.mapWidth * 2));
+      canvas.height = Math.max(1, Math.round(layout.mapHeight * 2));
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('Không thể tạo canvas để vẽ mini-map.');
+      context.drawImage(
+        this.miniMapSource,
+        this.miniMapSource.width * bounds.left / state.width,
+        this.miniMapSource.height * bounds.top / state.height,
+        this.miniMapSource.width * bounds.width / state.width,
+        this.miniMapSource.height * bounds.height / state.height,
+        0,
+        0,
+        canvas.width,
+        canvas.height
+      );
+      this.miniMapCanvasTexture.refresh();
+      this.miniMapImage
+        .setPosition(layout.mapX, layout.mapY)
+        .setDisplaySize(layout.mapWidth, layout.mapHeight);
+    } else {
+      terrain.fillStyle(0x172a32, 1).fillRect(layout.mapX, layout.mapY, layout.mapWidth, layout.mapHeight);
+    }
+    frame.lineStyle(1, 0xa8c6d8, 0.8).strokeRoundedRect(layout.x, layout.y, layout.width, layout.height, 6);
+    frame.lineStyle(1, 0xc2e6ff, 0.9).strokeRect(
+      layout.mapX,
+      layout.mapY,
+      layout.mapWidth,
+      layout.mapHeight
+    );
+    this.drawMiniMapMarkers();
+  }
+
+  private drawMiniMapMarkers(): void {
+    const state = this.miniMapState;
+    const positions = this.miniMapMarkersState;
+    const layout = this.miniMapLayout();
+    const markers = this.miniMapMarkers;
+    if (!state || !positions || !layout || !markers) return;
+
+    markers.clear();
+    const bounds = this.miniMapBounds(state);
+    const cellWidth = layout.mapWidth / bounds.width;
+    const cellHeight = layout.mapHeight / bounds.height;
+    const radius = Math.max(2, Math.min(cellWidth, cellHeight) * 0.7);
+    const drawDot = (x: number, y: number, color: number): void => {
+      if (x < bounds.left || y < bounds.top || x >= bounds.left + bounds.width || y >= bounds.top + bounds.height) {
+        return;
+      }
+      const markerX = layout.mapX + (x - bounds.left) * cellWidth;
+      const markerY = layout.mapY + (y - bounds.top) * cellHeight;
+      const clippedRadius = Math.min(
+        radius,
+        markerX - layout.mapX,
+        layout.mapX + layout.mapWidth - markerX,
+        markerY - layout.mapY,
+        layout.mapY + layout.mapHeight - markerY
+      );
+      if (clippedRadius > 0) markers.fillStyle(color, 1).fillCircle(markerX, markerY, clippedRadius);
+    };
+    for (const other of positions.others) drawDot(other.x, other.y, other.pk ? 0xff3333 : 0xffffff);
+    if (positions.npc) drawDot(positions.npc.x, positions.npc.y, 0xffd43b);
+    drawDot(positions.player.x, positions.player.y, 0x168bff);
+  }
+
+  private miniMapBounds(state: MiniMapState): MiniMapBounds {
+    const width = Math.min(state.width, state.width / this.miniMapZoom);
+    const height = Math.min(state.height, state.height / this.miniMapZoom);
+    const centerX = this.miniMapMarkersState?.player.x ?? state.width / 2;
+    const centerY = this.miniMapMarkersState?.player.y ?? state.height / 2;
+    return {
+      left: Phaser.Math.Clamp(centerX - width / 2, 0, state.width - width),
+      top: Phaser.Math.Clamp(centerY - height / 2, 0, state.height - height),
+      width,
+      height
+    };
+  }
+
+  private loadMiniMapImage(url: string): void {
+    const key = 'minimap-map-image';
+    if (url === this.miniMapImageUrl && this.textures.exists(key)) return;
+    if (url === this.miniMapImageUrl) return;
+    this.miniMapImageUrl = url;
+    if (this.textures.exists(key)) this.textures.remove(key);
+    this.load.image(key, url);
+    this.load.once(Phaser.Loader.Events.COMPLETE, () => {
+      if (!this.textures.exists(key)) {
+        console.error(`[MiniMap] PNG mini-map không được nạp: ${url}`);
+        return;
+      }
+      this.miniMapSource = this.textures.get(key).getSourceImage() as HTMLImageElement | HTMLCanvasElement;
+      const canvasKey = 'minimap-map-canvas';
+      if (this.textures.exists(canvasKey)) this.textures.remove(canvasKey);
+      this.miniMapCanvas = document.createElement('canvas');
+      this.miniMapCanvas.width = 1;
+      this.miniMapCanvas.height = 1;
+      const canvasTexture = this.textures.addCanvas(canvasKey, this.miniMapCanvas);
+      if (!canvasTexture) throw new Error('Không thể khởi tạo texture canvas cho mini-map.');
+      this.miniMapCanvasTexture = canvasTexture;
+      this.miniMapImage?.destroy();
+      this.miniMapImage = this.add
+        .image(0, 0, canvasKey)
+        .setOrigin(0)
+        .setDepth(10)
+        .setScrollFactor(0);
+      this.drawMiniMap();
+    });
+    this.load.once(Phaser.Loader.Events.FILE_LOAD_ERROR, (file: Phaser.Loader.File) => {
+      if (file.key === key) console.error(`[MiniMap] Không tải được PNG mini-map: ${file.src}`);
+    });
+    this.load.start();
+  }
+
+  private isInsideMiniMap(x: number, y: number, layout: MiniMapLayout): boolean {
+    return (
+      x >= layout.mapX &&
+      x <= layout.mapX + layout.mapWidth &&
+      y >= layout.mapY &&
+      y <= layout.mapY + layout.mapHeight
+    );
   }
 
   private showCharacterMenu(

@@ -4,27 +4,29 @@ import {
   CLICK_EFFECT,
   CLOUD_COVER,
   GAME,
+  MAP_PREVIEW_URL,
   MAP_STREAM_BASE_URL,
-  MAP_STREAM_RADIUS,
+  MAP_STREAM_HEIGHT_TILES,
+  MAP_STREAM_WIDTH_TILES,
   SPRITE_EVOLUTIONS
 } from '../config';
-import { Npc } from '../entities/Npc';
 import { Monster } from '../entities/Monster';
+import { Npc } from '../entities/Npc';
 import { Player } from '../entities/Player';
 import { RemotePlayer } from '../entities/RemotePlayer';
 import type { ResolvedTileset } from '../loaders/tilesets';
 import { ChunkManager } from '../map/ChunkManager';
 import { GID_MASK, MapModel, type Vec2 } from '../map/MapModel';
-import type { StreamedCell, StreamedObject, StreamedMapManifest } from '../map/StreamedMap';
-import { getProp } from '../types/tiled';
+import type { StreamedCell, StreamedMapManifest, StreamedObject } from '../map/StreamedMap';
 import type { PlayerCharacter } from '../types/accounts';
 import type {
-  ClientPvPMessage,
   CharacterStats,
+  ClientPvPMessage,
   DuelView,
   NetworkPlayer,
   ServerPvPMessage
 } from '../types/pvp';
+import { getProp } from '../types/tiled';
 
 export class GameScene extends Phaser.Scene {
   private model!: MapModel;
@@ -59,6 +61,11 @@ export class GameScene extends Phaser.Scene {
   private unit = 1;
   private initialSpawn?: Vec2;
   private statusMessage = '';
+  private miniMapDestination?: Vec2;
+  private miniMapRouteRetryAt = 0;
+  private minimapMarkerElapsed = 0;
+  private hudElapsed = 250;
+  private chunkCentersSignature = '';
   private readonly tileObjectsByCell = new Map<string, Phaser.GameObjects.GameObject[]>();
   private readonly objectSprites = new Map<string, Phaser.GameObjects.GameObject[]>();
 
@@ -98,6 +105,11 @@ export class GameScene extends Phaser.Scene {
     this.suppressKeyboardUntilRelease = false;
     this.initialSpawn = undefined;
     this.statusMessage = '';
+    this.miniMapDestination = undefined;
+    this.miniMapRouteRetryAt = 0;
+    this.minimapMarkerElapsed = 0;
+    this.hudElapsed = 250;
+    this.chunkCentersSignature = '';
     this.lastPointerTarget = '';
     this.debugOn = false;
     this.cloudSprites.forEach((cloud) => cloud.destroy());
@@ -116,7 +128,8 @@ export class GameScene extends Phaser.Scene {
       `${import.meta.env.BASE_URL}${MAP_STREAM_BASE_URL}`,
       this.model.width,
       this.model.height,
-      MAP_STREAM_RADIUS,
+      MAP_STREAM_WIDTH_TILES,
+      MAP_STREAM_HEIGHT_TILES,
       (cells) => this.onRegionLoaded(cells),
       (error) => {
         console.error('[MapStream]', error);
@@ -125,6 +138,16 @@ export class GameScene extends Phaser.Scene {
       }
     );
     this.events.once('shutdown', () => this.chunkManager.dispose());
+    const onMinimapMove = (previewPosition: Vec2): void => {
+      if (!this.accountReady) return;
+      const destination = this.model.previewToTile(previewPosition.x, previewPosition.y);
+      this.setMiniMapDestination({ x: Math.floor(destination.x), y: Math.floor(destination.y) });
+    };
+    const onMinimapRequest = (): void => this.emitMiniMapMap();
+    this.events.on('minimap-move', onMinimapMove);
+    this.events.on('minimap-request', onMinimapRequest);
+    this.events.once('shutdown', () => this.events.off('minimap-move', onMinimapMove));
+    this.events.once('shutdown', () => this.events.off('minimap-request', onMinimapRequest));
 
     const enterGame = (selection: { character: PlayerCharacter; username: string }): void => {
       this.selectedCharacter = selection.character;
@@ -253,7 +276,7 @@ export class GameScene extends Phaser.Scene {
         this.events.emit('pvp-stats', message.stats);
         this.positionSync?.remove();
         this.positionSync = this.time.addEvent({
-          delay: 100,
+          delay: 1,
           loop: true,
           callback: () => {
             if (!this.player || !this.accountReady) return;
@@ -332,7 +355,7 @@ export class GameScene extends Phaser.Scene {
         remote = new RemotePlayer(this, this.model, player);
         this.remoteSprites.set(player.id, remote);
       } else {
-        remote.sync(this.model, player);
+        remote.sync(player);
       }
     }
     this.events.emit('online-players', validPlayers.length);
@@ -380,29 +403,59 @@ export class GameScene extends Phaser.Scene {
 
   update(_time: number, delta: number): void {
     if (!this.player) return;
+    for (const remote of this.remoteSprites.values()) remote.update(this.model);
+    const direction = this.readDirection();
     const pointer = this.input.activePointer;
     if (this.accountReady && this.draggingMap && pointer.leftButtonDown()) {
       const worldPoint = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
       this.setMoveDestination(worldPoint.x, worldPoint.y, false);
     }
-    if (this.accountReady) this.player.update(delta, this.readDirection());
+    if (direction.x !== 0 || direction.y !== 0) this.miniMapDestination = undefined;
+    if (this.accountReady) this.player.update(delta, direction);
+    if (this.miniMapDestination && !this.player.hasPath && Date.now() >= this.miniMapRouteRetryAt) {
+      this.continueMiniMapDestination();
+    }
 
     const tile = this.player.tile;
-    this.chunkManager.updateCenters([
+    this.minimapMarkerElapsed += delta;
+    if (this.minimapMarkerElapsed >= 50) {
+      this.minimapMarkerElapsed %= 50;
+      const playerPreviewPosition = this.model.tileToPreview(this.player.fx, this.player.fy);
+      this.events.emit('minimap-markers', {
+        player: playerPreviewPosition,
+        others: [...this.networkPlayers.values()].map(({ x, y, pk }) => ({
+          ...this.model.tileToPreview(x, y),
+          pk
+        })),
+        npc: this.npcTile
+          ? this.model.tileToPreview(this.npcTile.x + 0.5, this.npcTile.y + 0.5)
+          : undefined
+      });
+    }
+    const centers = [
       tile,
       ...[...this.networkPlayers.values()].map((remote) => ({
         x: Math.floor(remote.x),
         y: Math.floor(remote.y)
       }))
-    ]);
+    ];
+    const centersSignature = centers.map(({ x, y }) => `${x},${y}`).join('|');
+    if (centersSignature !== this.chunkCentersSignature) {
+      this.chunkCentersSignature = centersSignature;
+      this.chunkManager.updateCenters(centers);
+    }
     this.syncCloudCover();
-    const debugHint = __DEBUG__ ? `  |  Debug: ${this.debugOn ? 'ON' : 'OFF'}` : '';
-    const status = this.statusMessage ? `  |  ${this.statusMessage}` : '';
-    const target = this.selectedTarget ? `  |  Mục tiêu: ${this.selectedTarget.name}` : '';
-    this.events.emit(
-      'hud',
-      `Tile: (${tile.x}, ${tile.y})  |  Zoom: ${(this.cameras.main.zoom * this.unit).toFixed(2)}${debugHint}${target}${status}`
-    );
+    this.hudElapsed += delta;
+    if (this.hudElapsed >= 250) {
+      this.hudElapsed %= 250;
+      const debugHint = __DEBUG__ ? `  |  Debug: ${this.debugOn ? 'ON' : 'OFF'}` : '';
+      const status = this.statusMessage ? `  |  ${this.statusMessage}` : '';
+      const target = this.selectedTarget ? `  |  Mục tiêu: ${this.selectedTarget.name}` : '';
+      this.events.emit(
+        'hud',
+        `Tile: (${tile.x}, ${tile.y})  |  Zoom: ${(this.cameras.main.zoom * this.unit).toFixed(2)}${debugHint}${target}${status}`
+      );
+    }
 
     if (this.debugOn) {
       this.debugCursor.clear();
@@ -413,6 +466,7 @@ export class GameScene extends Phaser.Scene {
 
   private onRegionLoaded(cells: StreamedCell[]): void {
     this.model.setActiveCells(cells);
+    this.emitMiniMapMap();
     this.renderRegion(cells);
     this.syncNpcSprite();
     this.syncMonsterSprite();
@@ -437,6 +491,15 @@ export class GameScene extends Phaser.Scene {
         this.events.emit('hud', `Không thể khởi tạo map: ${this.statusMessage}`);
       }
     }
+    if (this.player && this.miniMapDestination) this.continueMiniMapDestination();
+  }
+
+  private emitMiniMapMap(): void {
+    this.events.emit('minimap-map', {
+      width: this.model.width,
+      height: this.model.height,
+      imageUrl: `${import.meta.env.BASE_URL}${MAP_PREVIEW_URL}`
+    });
   }
 
   private createPlayer(spawn: Vec2): void {
@@ -473,6 +536,7 @@ export class GameScene extends Phaser.Scene {
       this.syncLocalNameplate();
       this.connectMultiplayer();
     }
+    if (this.miniMapDestination) this.continueMiniMapDestination();
   }
 
   private createClickEffect(): void {
@@ -525,10 +589,14 @@ export class GameScene extends Phaser.Scene {
     this.textures.get(CLOUD_COVER.key).setFilter(Phaser.Textures.FilterMode.LINEAR);
 
     let visibleIndex = 0;
-    const minTileX = center.x - MAP_STREAM_RADIUS + 0.5;
-    const maxTileX = center.x + MAP_STREAM_RADIUS + 0.5;
-    const minTileY = center.y - MAP_STREAM_RADIUS + 0.5;
-    const maxTileY = center.y + MAP_STREAM_RADIUS + 0.5;
+    const centerTileX = center.x + 0.5;
+    const centerTileY = center.y + 0.5;
+    const halfWidth = (CLOUD_COVER.clearWidthTiles - 1) / 2;
+    const halfHeight = (CLOUD_COVER.clearHeightTiles - 1) / 2;
+    const minTileX = centerTileX - halfWidth;
+    const maxTileX = centerTileX + halfWidth;
+    const minTileY = centerTileY - halfHeight;
+    const maxTileY = centerTileY + halfHeight;
 
     for (let gridY = minGridY; gridY <= maxGridY; gridY++) {
       for (let gridX = minGridX; gridX <= maxGridX; gridX++) {
@@ -577,7 +645,7 @@ export class GameScene extends Phaser.Scene {
             start,
             end: start + form.framesPerDirection - 1
           }),
-          frameRate: 8,
+          frameRate: GAME.ANIMATION_FPS,
           repeat: -1
         });
       });
@@ -630,7 +698,7 @@ export class GameScene extends Phaser.Scene {
         sprite = this.add
           .image(p.x + tileset.offsetX, p.y + this.model.tileHeight / 2 + tileset.offsetY, tileset.textureKey, frame)
           .setOrigin(0.5, 1);
-        sprite.setDepth(above ? 100000 + layerIndex : cell.x + cell.y + 1 + layerIndex * 0.001);
+        sprite.setDepth(above ? 100000 + layerIndex : this.model.depthAt(cell.x + 0.5, cell.y + 0.5) + layerIndex * 0.001);
       } else {
         sprite = this.add
           .image(p.x + tileset.offsetX, p.y + tileset.offsetY, tileset.textureKey, frame)
@@ -654,14 +722,17 @@ export class GameScene extends Phaser.Scene {
     const gid = object.gid & GID_MASK;
     const tileset = this.model.tilesetForGid(gid);
     if (!tileset) return [];
-    const tx = object.x / this.model.tileHeight;
-    const ty = object.y / this.model.tileHeight;
-    const p = this.model.tileToWorld(tx, ty);
+    const objectTile = this.model.orientation === 'staggered'
+      ? this.model.worldToTile(object.x, object.y)
+      : { x: object.x / this.model.tileHeight, y: object.y / this.model.tileHeight };
+    const p = this.model.orientation === 'staggered'
+      ? { x: object.x, y: object.y }
+      : this.model.tileToWorld(objectTile.x, objectTile.y);
     const image = this.add
       .image(p.x + tileset.offsetX, p.y + tileset.offsetY, tileset.textureKey, this.ensureFrame(tileset, gid - tileset.firstgid))
       .setOrigin(0.5, 1)
       .setAlpha(layer.opacity ?? 1)
-      .setDepth(tx + ty + layerIndex * 0.001);
+      .setDepth(this.model.depthAt(objectTile.x, objectTile.y) + layerIndex * 0.001);
     if (object.width && object.height) image.setDisplaySize(object.width, object.height);
     if (object.rotation) image.setAngle(object.rotation);
     this.applyTiledGidFlags(image, object.gid);
@@ -712,6 +783,10 @@ export class GameScene extends Phaser.Scene {
 
     this.input.mouse?.disableContextMenu();
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      if (this.isMiniMapScreenPoint(pointer.x, pointer.y)) {
+        this.draggingMap = false;
+        return;
+      }
       if (!this.accountReady) return;
       const target = this.targetAt(pointer.worldX, pointer.worldY);
       if (pointer.leftButtonDown()) {
@@ -725,6 +800,7 @@ export class GameScene extends Phaser.Scene {
           if (this.activeDuel?.opponentId === target.id) {
             this.attackRemotePlayer('basic-attack', target.id, target.name);
           }
+
           return;
         }
         if (target?.kind === 'monster') {
@@ -753,6 +829,7 @@ export class GameScene extends Phaser.Scene {
       } else if (target?.kind === 'monster') {
         this.issueCombatCommand('skill-2', target.id, target.name);
       } else {
+        this.miniMapDestination = undefined;
         this.player?.stopMoving();
         this.suppressKeyboardUntilRelease = true;
         this.statusMessage = 'Đã dừng di chuyển.';
@@ -765,7 +842,8 @@ export class GameScene extends Phaser.Scene {
       this.draggingMap = false;
     });
 
-    this.input.on('wheel', (_pointer: Phaser.Input.Pointer, _objects: unknown, _dx: number, dy: number) => {
+    this.input.on('wheel', (pointer: Phaser.Input.Pointer, _objects: unknown, _dx: number, dy: number) => {
+      if (this.isMiniMapScreenPoint(pointer.x, pointer.y)) return;
       const camera = this.cameras.main;
       const next = Phaser.Math.Clamp(
         camera.zoom * (dy > 0 ? 0.9 : 1.1),
@@ -774,6 +852,12 @@ export class GameScene extends Phaser.Scene {
       );
       camera.setZoom(next);
     });
+  }
+
+  private isMiniMapScreenPoint(x: number, y: number): boolean {
+    const size = Math.min(240, this.scale.width * 0.36, this.scale.height * 0.45);
+    const left = this.scale.width - size;
+    return x >= left && x <= left + size && y >= 0 && y <= size;
   }
 
   private readDirection(): Vec2 {
@@ -810,6 +894,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private attackRemotePlayer(action: 'basic-attack' | 'skill-2', targetId: string, targetName: string): void {
+    this.miniMapDestination = undefined;
     this.player?.stopMoving();
     this.selectedTarget = { id: targetId, name: targetName };
     this.suppressKeyboardUntilRelease = true;
@@ -817,6 +902,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private issueCombatCommand(action: 'basic-attack' | 'skill-2', targetId: string, targetName: string): void {
+    this.miniMapDestination = undefined;
     this.player?.stopMoving();
     this.selectedTarget = { id: targetId, name: targetName };
     this.events.emit('target-selected', this.selectedTarget);
@@ -847,12 +933,13 @@ export class GameScene extends Phaser.Scene {
     const tile = this.model.worldToTile(x, y);
     this.clickEffect
       .setPosition(x, y)
-      .setDepth(Math.floor(tile.x) + Math.floor(tile.y) + 0.5)
+      .setDepth(this.model.depthAt(Math.floor(tile.x) + 0.5, Math.floor(tile.y) + 0.5) + 0.5)
       .setVisible(true)
       .play(CLICK_EFFECT.key, true);
   }
 
   private setMoveDestination(worldX: number, worldY: number, showEffect: boolean): void {
+    this.miniMapDestination = undefined;
     const tile = this.model.worldToTile(worldX, worldY);
     const gx = Math.floor(tile.x);
     const gy = Math.floor(tile.y);
@@ -863,21 +950,68 @@ export class GameScene extends Phaser.Scene {
 
     if (!this.model.isTileLoaded(gx, gy)) {
       this.player?.setPath([]);
-      const diameter = MAP_STREAM_RADIUS * 2 + 1;
-      this.statusMessage = `Đích ngoài vùng ${diameter}×${diameter} đang tải. Di chuyển gần hơn rồi thử lại.`;
+      this.statusMessage =
+        `Đích ngoài vùng ${MAP_STREAM_WIDTH_TILES}×${MAP_STREAM_HEIGHT_TILES} đang tải. ` +
+        'Di chuyển gần hơn rồi thử lại.';
       return;
     }
 
-    const from = this.player?.tile;
-    if (!from) return;
+    const player = this.player;
+    if (!player) return;
+    const from = player.tile;
     const path = this.model.findPath(from.x, from.y, gx, gy);
     if (path) {
       this.statusMessage = '';
-      this.player?.setPath(path);
+      const start = this.model.tileToWorld(player.fx, player.fy);
+      player.setPath(this.model.smoothPath(path, start));
     } else {
       this.player?.setPath([]);
       this.statusMessage = 'Không tìm thấy đường trong vùng đang tải.';
     }
+  }
+
+  private setMiniMapDestination(destination: Vec2): void {
+    const x = Math.floor(destination.x);
+    const y = Math.floor(destination.y);
+    const target = `${x},${y}`;
+    if (target === `${this.miniMapDestination?.x},${this.miniMapDestination?.y}`) return;
+    this.lastPointerTarget = target;
+    this.miniMapDestination = { x, y };
+    this.miniMapRouteRetryAt = 0;
+    const point = this.model.tileToWorld(x + 0.5, y + 0.5);
+    this.playClickEffect(point.x, point.y);
+    this.continueMiniMapDestination();
+  }
+
+  private continueMiniMapDestination(): void {
+    const player = this.player;
+    const destination = this.miniMapDestination;
+    if (!player || !destination) return;
+    if (this.model.isTileLoaded(destination.x, destination.y)) {
+      const path = this.model.findPath(player.tile.x, player.tile.y, destination.x, destination.y);
+      if (!path) {
+        this.miniMapDestination = undefined;
+        this.statusMessage = 'Không tìm thấy đường tới đích trên mini-map.';
+        player.stopMoving();
+        return;
+      }
+      this.miniMapDestination = undefined;
+      this.statusMessage = '';
+      const start = this.model.tileToWorld(player.fx, player.fy);
+      player.setPath(this.model.smoothPath(path, start));
+      return;
+    }
+
+    const path = this.model.findPathToward(player.tile.x, player.tile.y, destination.x, destination.y);
+    if (!path) {
+      this.miniMapRouteRetryAt = Date.now() + 500;
+      this.statusMessage = 'Đang tải vùng tiếp theo để tìm đường...';
+      return;
+    }
+    const start = this.model.tileToWorld(player.fx, player.fy);
+    player.setPath(this.model.smoothPath(path, start));
+    this.miniMapRouteRetryAt = Date.now() + 500;
+    this.statusMessage = 'Đang di chuyển tới đích trên mini-map...';
   }
 
   private drawBlockedOverlay(): void {

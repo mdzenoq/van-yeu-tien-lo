@@ -33,10 +33,15 @@ export class ChunkManager {
     private readonly baseUrl: string,
     private readonly width: number,
     private readonly height: number,
-    private readonly radius: number,
+    private readonly regionWidth: number,
+    private readonly regionHeight: number,
     private readonly onRegion: (cells: StreamedCell[]) => void,
     private readonly onError: (error: Error) => void
-  ) {}
+  ) {
+    if (!Number.isInteger(regionWidth) || regionWidth < 1 || !Number.isInteger(regionHeight) || regionHeight < 1) {
+      throw new Error('Kích thước vùng tải map phải là số nguyên dương.');
+    }
+  }
 
   updateCenter(centerX: number, centerY: number): void {
     this.updateCenters([{ x: centerX, y: centerY }]);
@@ -119,9 +124,13 @@ export class ChunkManager {
 
   private async loadRegion(centers: readonly CellCenter[], requestId: number, center: string): Promise<StreamedCell[]> {
     const coordinateMap = new Map<string, CellCenter>();
+    const left = Math.floor((this.regionWidth - 1) / 2);
+    const right = this.regionWidth - left - 1;
+    const top = Math.floor((this.regionHeight - 1) / 2);
+    const bottom = this.regionHeight - top - 1;
     for (const regionCenter of centers) {
-      for (let y = regionCenter.y - this.radius; y <= regionCenter.y + this.radius; y++) {
-        for (let x = regionCenter.x - this.radius; x <= regionCenter.x + this.radius; x++) {
+      for (let y = regionCenter.y - top; y <= regionCenter.y + bottom; y++) {
+        for (let x = regionCenter.x - left; x <= regionCenter.x + right; x++) {
           if (x < 0 || y < 0 || x >= this.width || y >= this.height) continue;
           coordinateMap.set(`${x}_${y}`, { x, y });
         }

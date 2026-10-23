@@ -15,6 +15,6 @@ export class Monster {
       .image(p.x, p.y, SPRITE_EVOLUTIONS.snake.key, 0)
       .setOrigin(0.5)
       .setScale(unit * 0.7)
-      .setDepth(tx + ty + 1);
+      .setDepth(model.depthAt(tx + 0.5, ty + 0.5));
   }
 }
