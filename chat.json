@@ -1,0 +1,125 @@
+[
+  {
+    "channel": "current",
+    "username": "mdzenoq",
+    "characterName": "Rắn mdzenoq",
+    "text": "kaka",
+    "timestamp": "2026-10-23T10:11:55.602Z",
+    "sequence": 1
+  },
+  {
+    "channel": "current",
+    "username": "mdzenos",
+    "characterName": "Rắn mdzenos",
+    "text": "ok",
+    "timestamp": "2026-10-23T10:12:32.701Z",
+    "sequence": 2
+  },
+  {
+    "sequence": 3,
+    "channel": "current",
+    "username": "mdzenoq",
+    "characterName": "Rắn mdzenoq",
+    "text": "ghjgfh",
+    "timestamp": "2026-10-23T10:15:37.327Z"
+  },
+  {
+    "channel": "current",
+    "username": "mdzenos",
+    "characterName": "Rắn mdzenos",
+    "text": "xxx",
+    "sequence": 4,
+    "timestamp": "2026-10-23T10:19:18.522Z"
+  },
+  {
+    "channel": "current",
+    "username": "mdzenoq",
+    "characterName": "Rắn mdzenoq",
+    "text": "cccccccc",
+    "sequence": 5,
+    "timestamp": "2026-10-23T10:19:21.330Z"
+  },
+  {
+    "channel": "current",
+    "username": "mdzenoq",
+    "characterName": "Rắn mdzenoq",
+    "text": "asasd",
+    "sequence": 6,
+    "timestamp": "2026-10-23T10:19:23.210Z"
+  },
+  {
+    "channel": "current",
+    "username": "mdzenoq",
+    "characterName": "Rắn mdzenoq",
+    "text": "asdasdas",
+    "sequence": 7,
+    "timestamp": "2026-10-23T10:19:24.218Z"
+  },
+  {
+    "channel": "current",
+    "username": "mdzenoq",
+    "characterName": "Rắn mdzenoq",
+    "text": "jhmfghljdfogjsdfadskfmasdasdjhmfghljdfogjsdfadskfmasdasdjhmfghljdfogjsdfadskfmasdasdjhmfghljdfogjsdfadskfmasdasdjhmfghljdfogjsdfadskfmasdasdjhmfghljdfogjsdfadskfmasdasdjhmfghljdfogjsdfadskfmasdasdjhmfghljdfogjsdfadskfmasdasdjhmfghljdfogjsdfadskfmasdasdjhmfghljdfogjsdfadskfmasdasdjhmfghljdfogjsdfadsk",
+    "sequence": 8,
+    "timestamp": "2026-10-23T10:21:54.301Z"
+  },
+  {
+    "channel": "current",
+    "username": "mdzenoq",
+    "characterName": "Rắn mdzenoq",
+    "text": "sffdas",
+    "sequence": 9,
+    "timestamp": "2026-10-23T10:25:26.321Z"
+  },
+  {
+    "channel": "current",
+    "username": "mdzenoq",
+    "characterName": "Rắn mdzenoq",
+    "text": "jhmfghljdfogjsdfadskfmasdasdjhmfghljdfogjsdfadskfmasdasdjhmfghljdfogjsdfadskfmasdasdjhmfghljdfogjsdfadskfmasdasdjhmfghljdfogjsdfadskfmasdasdjhmfghljdfogjsdfadskfmasdasdjhmfghljdfogjsdfadskfmasdasdjhmfghljdfogjsdfadskfmasdasdjhmfghljdfogjsdfadskfmasdasdjhmfghljdfogjsdfadskfmasdasdjhmfghljdfogjsdfadsk",
+    "sequence": 10,
+    "timestamp": "2026-10-23T10:25:30.062Z"
+  },
+  {
+    "channel": "guild",
+    "username": "mdzenoq",
+    "characterName": "Rắn mdzenoq",
+    "text": "sdfsdf",
+    "sequence": 11,
+    "timestamp": "2026-10-23T10:25:33.126Z"
+  },
+  {
+    "channel": "current",
+    "username": "mdzenoq",
+    "characterName": "Rắn mdzenoq",
+    "text": "dfgf",
+    "sequence": 12,
+    "timestamp": "2026-10-23T10:26:06.941Z"
+  },
+  {
+    "channel": "current",
+    "characterId": "d86b8764-54c5-4e20-a230-dc76a3e1857c",
+    "username": "mdzenoq",
+    "characterName": "Rắn mdzenoq",
+    "text": "sdfsdf",
+    "sequence": 13,
+    "timestamp": "2026-10-23T10:30:41.033Z"
+  },
+  {
+    "channel": "current",
+    "characterId": "d86b8764-54c5-4e20-a230-dc76a3e1857c",
+    "username": "mdzenoq",
+    "characterName": "Rắn mdzenoq",
+    "text": "dfgdfg",
+    "sequence": 14,
+    "timestamp": "2026-10-23T10:31:56.257Z"
+  },
+  {
+    "channel": "guild",
+    "characterId": "d86b8764-54c5-4e20-a230-dc76a3e1857c",
+    "username": "mdzenoq",
+    "characterName": "Rắn mdzenoq",
+    "text": "dfgdfg",
+    "sequence": 15,
+    "timestamp": "2026-10-23T10:32:06.961Z"
+  }
+]

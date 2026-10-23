@@ -109,3 +109,6 @@ export const GAME = {
   SPEED_PX: 100, // tốc độ di chuyển trên màn hình (pixel/giây)
   PLAYER_RADIUS: 0.22 // bán kính va chạm, tính theo đơn vị tile
 } as const;
+
+// Mức zoom mini-map lúc bắt đầu; có thể tiếp tục thay đổi bằng con lăn chuột trên mini-map.
+export const MINIMAP_ZOOM_SCALE = 3;

@@ -36,6 +36,10 @@ export class RemotePlayer {
     this.updateAnimation(player);
   }
 
+  setChatMessage(message: string): void {
+    this.nameplate.setChatMessage(message);
+  }
+
   update(model: MapModel, now = performance.now()): void {
     const renderAt = now - INTERPOLATION_DELAY_MS;
     while (this.snapshots.length > 2 && this.snapshots[1].receivedAt <= renderAt) {

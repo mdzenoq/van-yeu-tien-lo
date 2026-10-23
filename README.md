@@ -30,6 +30,8 @@ Phải chạy qua server (Vite/dev server hoặc `npm run preview`); mở thẳn
 | G | Bật/tắt debug (ô bị chặn màu đỏ, ô người chơi đang đứng) |
 | Nút tiến hóa | Tiến lên bậc tiếp theo; thao tác không thể đổi ngược |
 
+Mini-map nằm ở góc trên bên phải; cuộn chuột trên bản đồ để phóng to/thu nhỏ. Mức zoom ban đầu chỉnh bằng `MINIMAP_ZOOM_SCALE` trong `src/config.ts`. Khung chat ở góc dưới bên trái có các kênh **Tổng hợp** (hiển thị tin từ mọi kênh; gửi vào đây tương đương kênh **Hiện tại**), **Hiện tại**, **Tông môn** và **Hệ Thống** (chỉ xem); nội dung tin nhắn hiển thị sau tên người gửi. Mỗi tin nhắn tối đa 50 ký tự; mỗi tài khoản có thể gửi tin trong từng kênh chat một lần mỗi phút. Chat dùng chung WebSocket với PvP, tin nhắn mới được gửi realtime cho người chơi đang online và lưu vào `chat.json`. Lịch sử trước khi vào game không được tải lên giao diện.
+
 ## Tài khoản và nhân vật (tạm thời)
 
 Chạy bằng `npm run dev`: đăng nhập chỉ với username, sau đó tạo hoặc chọn nhân vật để vào map. Mỗi username có tối đa 3 nhân vật; nhân vật có giới tính nam/nữ, loài gốc rắn và tiến hóa hiện tại được lưu trong `users.json`. Chuỗi tiến hóa hiện tại là Rắn → Rắn đỏ → Rồng; server chỉ cho tiến lên đúng bậc kế tiếp và không hỗ trợ đổi ngược. Dữ liệu được ghi qua middleware API của Vite dev server. Khi đọc dữ liệu lưu cũ, API chuyển trường chỉ số `armorPenetration` sang `armorPen` và giữ nguyên các chỉ số hiện có. Đây là lưu trữ tạm thời chỉ dùng khi chạy dev; `npm run preview`/static hosting chưa có API ghi file, và đăng nhập username không có xác thực mật khẩu.

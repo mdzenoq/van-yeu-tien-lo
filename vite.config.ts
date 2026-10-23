@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { defineConfig, loadEnv, type Plugin } from 'vite';
 import { NEXT_CHARACTER_EVOLUTION } from './src/types/accounts';
 import { statsForEvolution } from './src/types/pvp';
+import type { ChatMessage } from './src/types/pvp';
 import { attachPvpServer } from './src/server/pvp';
 
 import type {
@@ -21,6 +22,7 @@ const genders = ['male', 'female'] as const satisfies readonly CharacterGender[]
 const species = ['snake'] as const satisfies readonly CharacterSpecies[];
 const evolutions = ['snake', 'red-snake', 'dragon'] as const satisfies readonly CharacterEvolution[];
 const usersFile = resolve(process.cwd(), 'users.json');
+const chatFile = resolve(process.cwd(), 'chat.json');
 let isCharacterDueling = (_characterId: string): boolean => false;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -158,6 +160,52 @@ function writeUsers(store: UserStore): void {
   const temporaryFile = `${usersFile}.tmp`;
   writeFileSync(temporaryFile, `${JSON.stringify(store, null, 2)}\n`);
   renameSync(temporaryFile, usersFile);
+}
+
+function readChat(): ChatMessage[] {
+  if (!existsSync(chatFile)) writeFileSync(chatFile, '[]\n');
+  const value: unknown = JSON.parse(readFileSync(chatFile, 'utf8'));
+  if (
+    !Array.isArray(value) ||
+    !value.every((message) =>
+      isRecord(message) &&
+      isOneOf(message.channel, ['current', 'system', 'guild'] as const) &&
+      typeof message.username === 'string' &&
+      typeof message.characterName === 'string' &&
+      typeof message.text === 'string' &&
+      typeof message.timestamp === 'string' &&
+      (message.sequence === undefined ||
+        (typeof message.sequence === 'number' && Number.isSafeInteger(message.sequence) && message.sequence > 0))
+    )
+  ) {
+    throw new Error('chat.json không đúng định dạng.');
+  }
+  let lastSequence = 0;
+  return value.map((message) => {
+    const sequence = message.sequence ?? lastSequence + 1;
+    if (sequence <= lastSequence) throw new Error('Thứ tự tin nhắn trong chat.json không hợp lệ.');
+    lastSequence = sequence;
+    return { ...message, sequence };
+  });
+}
+
+function writeChat(messages: ChatMessage[]): void {
+  const temporaryFile = `${chatFile}.tmp`;
+  writeFileSync(temporaryFile, `${JSON.stringify(messages, null, 2)}\n`);
+  renameSync(temporaryFile, chatFile);
+}
+
+function persistChatMessage(message: Omit<ChatMessage, 'sequence' | 'timestamp'>): ChatMessage {
+  const messages = readChat();
+  const chatMessage: ChatMessage = {
+    ...message,
+    sequence: (messages[messages.length - 1]?.sequence ?? 0) + 1,
+    timestamp: new Date().toISOString()
+  };
+  messages.push(chatMessage);
+  if (messages.length > 500) messages.splice(0, messages.length - 500);
+  writeChat(messages);
+  return chatMessage;
 }
 
 function sendJson(response: import('node:http').ServerResponse, status: number, body: unknown): void {
@@ -310,7 +358,7 @@ function pvpWebSocketPlugin(): Plugin {
       if (!(server.httpServer instanceof Server)) {
         throw new Error('PvP WebSocket cần HTTP server của Vite dev server.');
       }
-      isCharacterDueling = attachPvpServer(server.httpServer, readUsers);
+      isCharacterDueling = attachPvpServer(server.httpServer, readUsers, persistChatMessage);
     }
   };
 }

@@ -1,8 +1,14 @@
 import Phaser from 'phaser';
-import { MAP_STREAM_HEIGHT_TILES, MAP_STREAM_WIDTH_TILES, SPRITE_EVOLUTIONS } from '../config';
+import {
+  MAP_STREAM_HEIGHT_TILES,
+  MAP_STREAM_WIDTH_TILES,
+  MINIMAP_ZOOM_SCALE,
+  SPRITE_EVOLUTIONS
+} from '../config';
 import { NEXT_CHARACTER_EVOLUTION, type CharacterEvolution, type PlayerCharacter } from '../types/accounts';
-import type { CharacterStats, DuelView, ServerPvPMessage } from '../types/pvp';
+import type { CharacterStats, ChatMessage, DuelView, ServerPvPMessage } from '../types/pvp';
 import { AccountScreen } from '../ui/AccountScreen';
+import { ChatPanel } from '../ui/ChatPanel';
 
 interface MiniMapState {
   width: number;
@@ -54,6 +60,7 @@ export class UIScene extends Phaser.Scene {
   private miniMapTerrain?: Phaser.GameObjects.Graphics;
   private miniMapMarkers?: Phaser.GameObjects.Graphics;
   private miniMapTitle?: Phaser.GameObjects.Text;
+  private chatPanel?: ChatPanel;
 
   constructor() {
     super('UI');
@@ -64,7 +71,7 @@ export class UIScene extends Phaser.Scene {
     this.evolutionObjects = [];
     this.challengeObjects = [];
     this.activeDuel = undefined;
-    this.miniMapZoom = 1;
+    this.miniMapZoom = Phaser.Math.Clamp(MINIMAP_ZOOM_SCALE, 1, 12);
     this.miniMapImageUrl = '';
     this.miniMapSource = undefined;
     this.miniMapCanvas = undefined;
@@ -83,6 +90,9 @@ export class UIScene extends Phaser.Scene {
     const game = this.scene.get('Game');
     this.miniMapState = undefined;
     this.miniMapMarkersState = undefined;
+    this.chatPanel = new ChatPanel((channel, message) => {
+      game.events.emit('chat-send', { channel, text: message });
+    });
     this.miniMapBackground = this.add.graphics().setDepth(9).setScrollFactor(0);
     this.miniMapFrame = this.add.graphics().setDepth(12).setScrollFactor(0);
     this.miniMapTerrain = this.add.graphics().setDepth(11).setScrollFactor(0);
@@ -237,6 +247,7 @@ export class UIScene extends Phaser.Scene {
     const accountScreen = new AccountScreen((character, username) => {
       activeCharacter = character;
       activeUsername = username;
+      this.chatPanel?.show();
       evolutionMessage.setText('').setVisible(false);
       refreshEvolutionUi();
       game.events.emit('enter-game', { character, username });
@@ -286,6 +297,11 @@ export class UIScene extends Phaser.Scene {
         .setText(`HP ${stats.maxHp}  |  Công ${stats.attack}  |  Thủ ${stats.defense}  |  Xuyên giáp ${stats.armorPen}`)
         .setVisible(true);
     };
+    const onChatMessage = (message: ChatMessage): void => {
+      this.chatPanel?.addMessage(message);
+    };
+    const onChatStatus = (connected: boolean): void => this.chatPanel?.setConnected(connected);
+    const onChatError = (message: string): void => this.chatPanel?.setError(message);
     const onIncomingChallenge = (message: Extract<ServerPvPMessage, { type: 'challenge-incoming' }>): void => {
       this.showChallengePrompt(
         `${message.challenger.username} (${message.challenger.name}) mời bạn tỷ thí.`,
@@ -355,6 +371,9 @@ export class UIScene extends Phaser.Scene {
     game.events.on('duel-updated', onDuelUpdated);
     game.events.on('duel-ended', onDuelEnded);
     game.events.on('pvp-message', onPvpMessage);
+    game.events.on('chat-message', onChatMessage);
+    game.events.on('chat-status', onChatStatus);
+    game.events.on('chat-error', onChatError);
     const onHud = (line: string): void => {
       text.setText([
         `WASD / mũi tên: đi | Trái: chọn/đánh/đi | Phải: menu/dừng/skill 2 | Zoom: cuộn | G: debug`,
@@ -376,7 +395,12 @@ export class UIScene extends Phaser.Scene {
       game.events.off('duel-updated', onDuelUpdated);
       game.events.off('duel-ended', onDuelEnded);
       game.events.off('pvp-message', onPvpMessage);
+      game.events.off('chat-message', onChatMessage);
+      game.events.off('chat-status', onChatStatus);
+      game.events.off('chat-error', onChatError);
       accountScreen.destroy();
+      this.chatPanel?.destroy();
+      this.chatPanel = undefined;
       this.hideCharacterMenu();
       this.hideChallengePrompt();
       this.evolutionObjects.forEach((object) => object.destroy());

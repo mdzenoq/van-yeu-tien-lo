@@ -2,12 +2,21 @@ import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, Server } from 'node:http';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { CharacterEvolution, PlayerCharacter, UserStore } from '../types/accounts';
-import { statsForEvolution, type CharacterStats, type ClientPvPMessage, type DuelView, type NetworkPlayer, type ServerPvPMessage } from '../types/pvp';
+import {
+  statsForEvolution,
+  type CharacterStats,
+  type ChatMessage,
+  type ClientPvPMessage,
+  type DuelView,
+  type NetworkPlayer,
+  type ServerPvPMessage
+} from '../types/pvp';
 
 const CHALLENGE_TIMEOUT_MS = 60_000;
 const DUEL_DURATION_MS = 5 * 60_000;
 const BASIC_ATTACK_COOLDOWN_MS = 1_000;
 const SKILL_TWO_COOLDOWN_MS = 8_000;
+const CHAT_COOLDOWN_MS = 60_000;
 const SKILL_TWO_MULTIPLIER = 1.5;
 const DEFEAT_RESOLUTION_DELAY_MS = 100;
 
@@ -101,6 +110,13 @@ function parseMessage(data: WebSocket.RawData): ClientPvPMessage | undefined {
         return isEvolution(value.evolution)
           ? { type: 'character-update', evolution: value.evolution }
           : undefined;
+      case 'chat-send':
+        return (value.channel === 'current' || value.channel === 'guild') &&
+          typeof value.text === 'string' &&
+          value.text.length <= 300 &&
+          !/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(value.text)
+          ? { type: 'chat-send', channel: value.channel, text: value.text }
+          : undefined;
       case 'challenge':
         return typeof value.targetId === 'string' ? { type: 'challenge', targetId: value.targetId } : undefined;
       case 'challenge-response':
@@ -167,11 +183,16 @@ function duelView(playerId: string, duel: Duel, sessions: Map<string, PlayerSess
   };
 }
 
-export function attachPvpServer(httpServer: Server, readUsers: () => UserStore): (characterId: string) => boolean {
+export function attachPvpServer(
+  httpServer: Server,
+  readUsers: () => UserStore,
+  persistChatMessage: (message: Omit<ChatMessage, 'sequence' | 'timestamp'>) => ChatMessage
+): (characterId: string) => boolean {
   const webSocketServer = new WebSocketServer({ noServer: true, maxPayload: 8192 });
   const sessions = new Map<string, PlayerSession>();
   const challenges = new Map<string, Challenge>();
   const duels = new Map<string, Duel>();
+  const chatLastSentAt = new Map<string, number>();
   const emitPresence = (): void => {
     for (const [viewerId, viewer] of sessions) {
       const players = [...sessions.entries()]
@@ -356,6 +377,48 @@ export function attachPvpServer(httpServer: Server, readUsers: () => UserStore):
         session.character = updatedCharacter;
         send(session.socket, { type: 'player-updated', stats: characterStats(updatedCharacter) });
         emitPresence();
+        break;
+      }
+      case 'chat-send': {
+        const text = message.text.trim();
+        if (!text) {
+          send(session.socket, { type: 'chat-error', message: 'Tin nhắn không được để trống.' });
+          break;
+        }
+        if (text.length > 50) {
+          send(session.socket, { type: 'chat-error', message: 'Tin nhắn không được vượt quá 50 ký tự.' });
+          break;
+        }
+        const now = Date.now();
+        for (const [key, sentAt] of chatLastSentAt) {
+          if (now - sentAt >= CHAT_COOLDOWN_MS) chatLastSentAt.delete(key);
+        }
+        const cooldownKey = `${session.username.toLowerCase()}:${message.channel}`;
+        const lastSentAt = chatLastSentAt.get(cooldownKey);
+        if (lastSentAt !== undefined && now - lastSentAt < CHAT_COOLDOWN_MS) {
+          const remainingSeconds = Math.ceil((CHAT_COOLDOWN_MS - (now - lastSentAt)) / 1000);
+          send(session.socket, {
+            type: 'chat-error',
+            message: `Bạn có thể chat ở kênh này sau ${remainingSeconds} giây.`
+          });
+          break;
+        }
+        try {
+          const chatMessage = persistChatMessage({
+            channel: message.channel,
+            characterId: session.character.id,
+            username: session.username,
+            characterName: session.character.name,
+            text
+          });
+          chatLastSentAt.set(cooldownKey, now);
+          for (const recipient of sessions.values()) {
+            send(recipient.socket, { type: 'chat-message', message: chatMessage });
+          }
+        } catch (error) {
+          console.error('[Chat WebSocket] Không thể lưu tin nhắn.', error);
+          send(session.socket, { type: 'chat-error', message: 'Không thể lưu tin nhắn chat.' });
+        }
         break;
       }
       case 'challenge': {

@@ -42,10 +42,21 @@ export interface DuelView {
   endsAt: number;
 }
 
+export interface ChatMessage {
+  sequence: number;
+  channel: 'current' | 'system' | 'guild';
+  characterId?: string;
+  username: string;
+  characterName: string;
+  text: string;
+  timestamp: string;
+}
+
 export type ClientPvPMessage =
   | { type: 'join'; username: string; characterId: string; x: number; y: number; direction: number }
   | { type: 'position'; x: number; y: number; direction: number }
   | { type: 'character-update'; evolution: CharacterEvolution }
+  | { type: 'chat-send'; channel: 'current' | 'guild'; text: string }
   | { type: 'challenge'; targetId: string }
   | { type: 'challenge-response'; challengeId: string; accept: boolean }
   | { type: 'challenge-cancel'; challengeId: string }
@@ -55,6 +66,8 @@ export type ServerPvPMessage =
   | { type: 'joined'; player: NetworkPlayer; players: NetworkPlayer[]; stats: CharacterStats }
   | { type: 'players'; players: NetworkPlayer[] }
   | { type: 'player-updated'; stats: CharacterStats }
+  | { type: 'chat-message'; message: ChatMessage }
+  | { type: 'chat-error'; message: string }
   | {
       type: 'challenge-incoming';
       challengeId: string;

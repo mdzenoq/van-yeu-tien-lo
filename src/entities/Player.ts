@@ -51,6 +51,10 @@ export class Player {
     this.syncNameplate();
   }
 
+  setChatMessage(message: string): void {
+    this.nameplate.setChatMessage(message);
+  }
+
   setEvolution(evolution: CharacterEvolution): void {
     if (evolution === this.activeEvolution) return;
     this.activeEvolution = evolution;

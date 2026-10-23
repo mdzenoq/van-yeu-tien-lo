@@ -170,15 +170,24 @@ export class GameScene extends Phaser.Scene {
       this.sendNetwork({ type: 'challenge-cancel', challengeId });
     const onCombatAction = (action: 'basic-attack' | 'skill-2', targetId: string): void =>
       this.sendNetwork({ type: 'attack', action, targetId });
+    const onChatSend = (message: { channel: 'current' | 'guild'; text: string }): void => {
+      if (!this.accountReady) {
+        this.events.emit('chat-error', 'Chat chưa kết nối.');
+        return;
+      }
+      this.sendNetwork({ type: 'chat-send', ...message });
+    };
     this.events.on('request-duel', onRequestDuel);
     this.events.on('respond-duel', onRespondDuel);
     this.events.on('cancel-duel', onCancelDuel);
     this.events.on('pvp-attack', onCombatAction);
+    this.events.on('chat-send', onChatSend);
     this.events.once('shutdown', () => {
       this.events.off('request-duel', onRequestDuel);
       this.events.off('respond-duel', onRespondDuel);
       this.events.off('cancel-duel', onCancelDuel);
       this.events.off('pvp-attack', onCombatAction);
+      this.events.off('chat-send', onChatSend);
       this.stopMultiplayer();
     });
 
@@ -198,6 +207,7 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     this.accountReady = false;
+    this.events.emit('chat-status', false);
     this.statusMessage = 'Đang kết nối PvP...';
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const socket = new WebSocket(`${protocol}//${location.host}/ws`);
@@ -226,11 +236,13 @@ export class GameScene extends Phaser.Scene {
     });
     socket.addEventListener('error', () => {
       this.statusMessage = 'Không thể kết nối máy chủ PvP.';
+      this.events.emit('chat-error', this.statusMessage);
       this.events.emit('pvp-message', this.statusMessage);
     });
     socket.addEventListener('close', () => {
       if (this.networkSocket !== socket) return;
       this.networkSocket = undefined;
+      this.events.emit('chat-status', false);
       this.positionSync?.remove();
       this.positionSync = undefined;
       this.accountReady = true;
@@ -270,6 +282,7 @@ export class GameScene extends Phaser.Scene {
           this.player.setWorldTilePosition(position.x, position.y);
         }
         this.accountReady = true;
+        this.events.emit('chat-status', true);
         this.statusMessage = '';
         this.playerStats = message.stats;
         this.syncLocalNameplate();
@@ -293,6 +306,28 @@ export class GameScene extends Phaser.Scene {
         this.playerStats = message.stats;
         this.syncLocalNameplate();
         this.events.emit('pvp-stats', message.stats);
+        break;
+      case 'chat-message':
+        if (message.message.channel === 'current') {
+          const characterId = message.message.characterId;
+          if (characterId === this.selectedCharacter?.id) {
+            this.player?.setChatMessage(message.message.text);
+          } else {
+            const sender = characterId
+              ? this.networkPlayers.get(characterId)
+              : [...this.networkPlayers.values()].find(
+                  (player) =>
+                    player.username === message.message.username &&
+                    player.name === message.message.characterName
+                );
+            const remotePlayer = sender ? this.remoteSprites.get(sender.id) : undefined;
+            remotePlayer?.setChatMessage(message.message.text);
+          }
+        }
+        this.events.emit('chat-message', message.message);
+        break;
+      case 'chat-error':
+        this.events.emit('chat-error', message.message);
         break;
       case 'players':
         this.syncRemotePlayers(message.players);
@@ -861,6 +896,12 @@ export class GameScene extends Phaser.Scene {
   }
 
   private readDirection(): Vec2 {
+    if (
+      document.activeElement instanceof HTMLInputElement ||
+      document.activeElement instanceof HTMLTextAreaElement
+    ) {
+      return { x: 0, y: 0 };
+    }
     const cursor = this.cursors;
     const keys = this.wasd;
     const left = !!(cursor?.left.isDown || keys?.A.isDown);

@@ -3,11 +3,14 @@ import type { MapModel } from '../map/MapModel';
 
 export class Nameplate {
   private readonly label: Phaser.GameObjects.Text;
+  private readonly chatLabel: Phaser.GameObjects.Text;
   private readonly healthBar: Phaser.GameObjects.Graphics;
   private lastHealthRatio = -1;
   private lastHealthWidth = 0;
   private lastName = '';
   private lastColor = '';
+  private chatMessage = '';
+  private chatMessageExpiresAt = 0;
 
   constructor(scene: Phaser.Scene) {
     this.label = scene.add
@@ -28,7 +31,24 @@ export class Nameplate {
       })
       .setOrigin(0.5, 1)
       .setResolution(Math.max(2, window.devicePixelRatio * 2));
+    this.chatLabel = scene.add
+      .text(0, 0, '', {
+        fontFamily: 'sans-serif',
+        fontSize: '14px',
+        color: '#fff3a6',
+        stroke: '#000000',
+        strokeThickness: 3,
+        resolution: 2
+      })
+      .setOrigin(0, 1)
+      .setResolution(Math.max(2, window.devicePixelRatio * 2))
+      .setVisible(false);
     this.healthBar = scene.add.graphics();
+  }
+
+  setChatMessage(message: string): void {
+    this.chatMessage = message.slice(0, 120);
+    this.chatMessageExpiresAt = Date.now() + 5000;
   }
 
   sync(
@@ -59,6 +79,16 @@ export class Nameplate {
     this.label
       .setPosition(point.x, point.y - 49 * unit)
       .setDepth(depth + 0.03);
+    if (this.chatMessage && Date.now() >= this.chatMessageExpiresAt) this.chatMessage = '';
+    if (this.chatMessage) {
+      this.chatLabel
+        .setText(this.chatMessage)
+        .setPosition(point.x + this.label.width / 2 + 5 * unit, point.y - 49 * unit)
+        .setDepth(depth + 0.04)
+        .setVisible(true);
+    } else {
+      this.chatLabel.setVisible(false);
+    }
     this.healthBar
       .setPosition(point.x, point.y - 49 * unit + healthBarGap)
       .setDepth(depth + 0.03);
@@ -76,6 +106,7 @@ export class Nameplate {
 
   destroy(): void {
     this.label.destroy();
+    this.chatLabel.destroy();
     this.healthBar.destroy();
   }
 }
